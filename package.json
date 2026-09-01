@@ -1,0 +1,16 @@
+{
+  "name": "hipster-clone",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web",
+    "preview": "npm run preview -w apps/web",
+    "lint": "npm run lint -w apps/web"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ]
+}
