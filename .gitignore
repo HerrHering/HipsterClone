@@ -13,3 +13,4 @@ tools/scraper/data/review-needed.csv
 .vscode/*
 !.vscode/extensions.json
 .DS_Store
+.venv/
