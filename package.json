@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "dev": "npm run dev -w apps/web",
-    "build": "npm run build -w apps/web",
+    "dev": "concurrently -n web,api \"npm run dev -w apps/web\" \"npm run dev -w apps/api\"",
+    "build": "npm run build -w apps/web && npm run build -w apps/api",
     "preview": "npm run preview -w apps/web",
     "lint": "npm run lint -w apps/web",
     "scrape": "npm run scrape -w tools/scraper"
@@ -13,5 +13,8 @@
     "apps/*",
     "packages/*",
     "tools/*"
-  ]
+  ],
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
 }

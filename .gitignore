@@ -6,8 +6,7 @@ dist-ssr/
 # generated audio content and manifest — regenerate via the scraper
 apps/web/public/audio/
 apps/web/public/manifest.json
-tools/scraper/data/cache/
-tools/scraper/data/review-needed.csv
+apps/api/data/cache/
 
 # editor/OS
 .vscode/*
