@@ -5,16 +5,27 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+// `promisify` turns execFile's callback-style API into one that returns a
+// Promise, so it can be `await`ed below instead of nesting a callback.
 const execFileAsync = promisify(execFile);
 
+// `import.meta.url` is this file's own `file://...` location; converting it
+// to a plain path is how this file finds the repo root relative to itself,
+// regardless of which directory `npm run dev` happens to be invoked from.
 const here = dirname(fileURLToPath(import.meta.url));
+// LOCAL FILESYSTEM PATH — never sent anywhere, just used to locate .venv below.
 const repoRoot = resolve(here, "../../..");
 
 // yt-dlp needs a recent build to solve YouTube's JS signature challenges —
 // prefer the project's own .venv (python3 -m venv .venv && .venv/bin/pip
 // install -U yt-dlp) if one exists, falling back to PATH otherwise.
+// LOCAL FILESYSTEM PATH — the on-disk location of an executable.
 const venvYtDlp = resolve(repoRoot, ".venv/bin/yt-dlp");
 const YTDLP_BIN = existsSync(venvYtDlp) ? venvYtDlp : "yt-dlp";
+
+// Off by default. Set HIPSTER_DEBUG=1 (e.g. `HIPSTER_DEBUG=1 npm run dev`) to
+// print the exact yt-dlp command run for each download and its outcome.
+const DEBUG = process.env.HIPSTER_DEBUG === "1";
 
 const VIDEO_ID_PATTERN = /^[\w-]{11}$/;
 
@@ -32,11 +43,17 @@ export async function downloadClip(
   videoId: string,
   cacheDir: string,
 ): Promise<{ filePath: string } | null> {
+  // Defense in depth: videoId always comes from resolveSource's own output
+  // today, never directly from user input, but checking its shape here
+  // means this function is safe to call from anywhere in the future too,
+  // without having to re-audit every caller.
   if (!VIDEO_ID_PATTERN.test(videoId)) {
     console.warn(`downloadClip: refusing suspicious video id "${videoId}"`);
     return null;
   }
 
+  // LOCAL FILESYSTEM PATH — cacheDir is a directory on this machine's disk
+  // (apps/api/data/cache); create it if this is the very first download.
   await mkdir(cacheDir, { recursive: true });
 
   const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER ?? "firefox";
@@ -53,25 +70,53 @@ export async function downloadClip(
     "node",
     "--remote-components",
     "ejs:github",
-    ...cookieArgs,
+    ...cookieArgs, // spread: splices the 0 or 2 cookie-flag elements in here
     "--download-sections",
     "*0:00-5:00",
     "-o",
+    // LOCAL FILESYSTEM PATH — yt-dlp's own `%(ext)s` placeholder syntax; it
+    // fills in the real extension (".mp3") itself once the download finishes,
+    // this is just the output template we're asking it to write to.
     resolve(cacheDir, `${songId}.%(ext)s`),
+    // REAL EXTERNAL URL — the only one in this file. This is what actually
+    // gets requested over the network (by yt-dlp, not by this Node process
+    // directly — execFileAsync just launches yt-dlp as a subprocess).
     `https://www.youtube.com/watch?v=${videoId}`,
   ];
+
+  if (DEBUG) {
+    console.log(`downloadClip debug: ${YTDLP_BIN} ${args.join(" ")}`);
+  }
 
   try {
     await execFileAsync(YTDLP_BIN, args, { maxBuffer: 10 * 1024 * 1024 });
   } catch (error) {
+    // A failed download is a real, user-visible problem (that song won't
+    // play), not a normal/expected outcome — always worth a warning. Under
+    // debug, also show the full error object (e.g. stderr/stack), not just
+    // the one-line message.
     console.warn(
       `downloadClip: yt-dlp failed for "${songId}" (${videoId}): ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    if (DEBUG) {
+      console.error(error);
+    }
     return null;
   }
 
+  // LOCAL FILESYSTEM PATH — where the downloaded mp3 should now be sitting.
   const filePath = resolve(cacheDir, `${songId}.mp3`);
-  return existsSync(filePath) ? { filePath } : null;
+  const result = existsSync(filePath) ? { filePath } : null;
+
+  if (DEBUG) {
+    console.log(
+      result
+        ? `downloadClip debug: wrote ${filePath}`
+        : `downloadClip debug: yt-dlp exited cleanly but ${filePath} is missing`,
+    );
+  }
+
+  return result;
 }

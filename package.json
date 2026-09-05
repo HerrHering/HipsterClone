@@ -4,10 +4,12 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "concurrently -n web,api \"npm run dev -w apps/web\" \"npm run dev -w apps/api\"",
+    "dev:debug": "HIPSTER_DEBUG=1 npm run dev",
     "build": "npm run build -w apps/web && npm run build -w apps/api",
     "preview": "npm run preview -w apps/web",
     "lint": "npm run lint -w apps/web",
-    "scrape": "npm run scrape -w tools/scraper"
+    "scrape": "npm run scrape -w tools/scraper",
+    "scrape:debug": "HIPSTER_DEBUG=1 npm run scrape"
   },
   "workspaces": [
     "apps/*",

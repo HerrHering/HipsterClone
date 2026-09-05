@@ -8,8 +8,7 @@
   },
   "dependencies": {
     "@hipster-clone/shared": "*",
-    "csv-parse": "^5.6.0",
-    "csv-stringify": "^6.5.2"
+    "csv-parse": "^5.6.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
