@@ -1,8 +1,11 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { GameAction } from "@hipster-clone/shared";
+import { errorMessage } from "@hipster-clone/shared";
 import express from "express";
 import { ensureCached, evictCached, listCachedIds } from "./cache.js";
+import { applyAction, createRoom, getState, joinRoom } from "./game.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // LOCAL FILESYSTEM PATH — apps/web's built output, only relevant/present
@@ -16,6 +19,12 @@ const DEBUG = process.env.HIPSTER_DEBUG === "1";
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 5174);
+
+// The room routes below take a JSON body (name, action) — none of the
+// existing audio routes did, so this middleware is new. `express.json()`
+// parses that body into `req.body`; a request with no/invalid JSON body
+// just gets `{}`, which the routes below already treat as "missing field."
+app.use(express.json());
 
 if (DEBUG) {
   // `app.use` with no path argument runs for every request, before any
@@ -78,6 +87,84 @@ app.post("/api/audio/:id/prefetch", async (req, res) => {
 app.delete("/api/audio/:id", async (req, res) => {
   const deleted = await evictCached(req.params.id);
   res.status(deleted ? 204 : 404).end();
+});
+
+// GAME ROOM ROUTES — everything a room's players poll/act through. A
+// thrown Error from game.ts here almost always means "this action doesn't
+// make sense right now" (wrong turn, stale phase, already used a steal) —
+// expected, recoverable client-side situations, not server bugs, so they
+// become a plain 400 with the message and only get logged under
+// HIPSTER_DEBUG (compare downloadClip.ts's catch, which *is* a genuine
+// unexpected failure and always warns).
+
+// Shared by every route below that catches a game.ts rejection — turns it
+// into a message, logs it under HIPSTER_DEBUG with whatever `context`
+// identifies which route it was, and sends the 400 response.
+function rejectAction(res: express.Response, context: string, error: unknown): void {
+  const message = errorMessage(error);
+  if (DEBUG) {
+    console.log(`game debug: ${context} rejected: ${message}`);
+  }
+  res.status(400).json({ error: message });
+}
+
+app.post("/api/rooms", (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+  res.json(createRoom(name));
+});
+
+app.post("/api/rooms/:code/join", (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+  try {
+    res.json(joinRoom(req.params.code.toUpperCase(), name));
+  } catch (error) {
+    rejectAction(res, "join", error);
+  }
+});
+
+// The poll target — every phone in a room GETs this every ~1.5s and
+// re-renders from whatever comes back. No playerId needed here: the game is
+// played with open cards, so there's nothing in GameState that should be
+// hidden from any particular player.
+app.get("/api/rooms/:code/state", (req, res) => {
+  const state = getState(req.params.code.toUpperCase());
+  if (!state) {
+    res.status(404).json({ error: `no room with code "${req.params.code}"` });
+    return;
+  }
+  res.json(state);
+});
+
+// The one mutation route — every button a player presses (start the game,
+// confirm a placement, attempt a steal, reveal, advance the turn, or
+// control playback) sends its GameAction here.
+app.post("/api/rooms/:code/action", async (req, res) => {
+  const { playerId, action } = req.body as {
+    playerId?: string;
+    action?: GameAction;
+  };
+  if (!playerId || !action) {
+    res.status(400).json({ error: "playerId and action are required" });
+    return;
+  }
+  try {
+    const state = await applyAction(
+      req.params.code.toUpperCase(),
+      playerId,
+      action,
+    );
+    res.json(state);
+  } catch (error) {
+    rejectAction(res, `action ${action.type}`, error);
+  }
 });
 
 // Serves a built apps/web from this same process/port, so a friend can run

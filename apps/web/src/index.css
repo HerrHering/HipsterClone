@@ -95,6 +95,31 @@ p {
   margin: 0;
 }
 
+/* The slot a player has currently picked (but not yet confirmed/attempted)
+   in PlacementPanel/StealPanel — see GameBoard.tsx's SlotPicker, which
+   already applies this class, it just had no style to show for it. Uses
+   the same --accent tokens the rest of the theme already defines for both
+   light and dark mode, so this needs no theme-specific rule of its own. */
+.slot-selected {
+  border: 2px solid var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+/* A slot someone (the active player's own placement, or another player's
+   steal attempt) already claimed this round — still fully visible/labeled
+   (open-card game), just not pickable by anyone else. Deliberately a
+   neutral gray, not --accent, so it reads as "unavailable" rather than
+   "selected." */
+.slot-claimed {
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 code,
 .counter {
   font-family: var(--mono);

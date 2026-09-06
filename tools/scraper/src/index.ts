@@ -27,6 +27,7 @@
 // outcome that doesn't need to alarm a normal run.
 
 import type { SongManifest, SongManifestEntry } from "@hipster-clone/shared";
+import { errorMessage } from "@hipster-clone/shared";
 import { parse } from "csv-parse/sync";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -73,9 +74,7 @@ async function loadPreviousManifest(): Promise<SongManifest | null> {
     // alarmed by something it's already recovering from gracefully.
     if (DEBUG) {
       console.warn(
-        `loadPreviousManifest: ${manifestPath} exists but failed to parse, ignoring it: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `loadPreviousManifest: ${manifestPath} exists but failed to parse, ignoring it: ${errorMessage(error)}`,
       );
     }
     return null;

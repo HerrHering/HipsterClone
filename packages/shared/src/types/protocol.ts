@@ -1,5 +1,14 @@
+// The Phase 3 game protocol: what a "room" looks like, and the shape of the
+// one HTTP action a client is allowed to send. The server (apps/api/src/game.ts)
+// is the *only* thing that ever mutates a GameState — every browser tab just
+// polls GET .../state and renders whatever comes back, and sends a GameAction
+// when a player does something. There is no client-to-client sync at all;
+// two phones only ever agree because they're both looking at the same server
+// state.
+
 export type PlayerId = string;
 
+// One song a player has already placed in their personal timeline.
 export interface TimelineCard {
   songId: string;
   year: number;
@@ -8,33 +17,91 @@ export interface TimelineCard {
 export interface PlayerState {
   id: PlayerId;
   name: string;
-  connected: boolean;
+  // Sorted by year ascending — see game.ts's correctInsertionIndex, which is
+  // the one place cards get inserted and is what keeps this sorted.
   timeline: TimelineCard[];
   tokens: number;
 }
 
+// Server-authoritative "where is the current song right now." Every phone's
+// <audio> element is a dumb follower of this, not an independent player —
+// see currentPlaybackPositionSec below for how a client turns this snapshot
+// into "the real position right now, this instant."
+export interface PlaybackState {
+  songId: string;
+  isPlaying: boolean;
+  // Where the track was, in seconds, as of `updatedAt`. Not updated
+  // continuously — only when isPlaying/positionSec actually change (play,
+  // pause, seek) — so it's always a little stale by the time a client reads
+  // it, which is exactly what `updatedAt` lets a reader correct for.
+  positionSec: number;
+  // Server epoch ms (Date.now()) when this snapshot was taken.
+  updatedAt: number;
+}
+
+// Turns a possibly-stale PlaybackState snapshot into "the actual position
+// right now." If the track is playing, time has kept moving since
+// `updatedAt` was recorded, so that elapsed time gets added on; if it's
+// paused, `positionSec` is already exactly right. Used by the server itself
+// (to compute a fresh positionSec when PAUSE is requested) and by every
+// client's <audio> element (to know how far to nudge currentTime) — one
+// formula, so the two can never disagree about what "in sync" means.
+export function currentPlaybackPositionSec(playback: PlaybackState): number {
+  if (!playback.isPlaying) {
+    return playback.positionSec;
+  }
+  const elapsedSec = (Date.now() - playback.updatedAt) / 1000;
+  return playback.positionSec + elapsedSec;
+}
+
+// Whose turn it is, independent of which phase that turn is currently in
+// (playingSong/stealWindow/reveal all belong to the same turn). `null`
+// before a game has started (turnOrder is empty in the lobby).
+export function currentPlayerId(state: GameState): PlayerId | null {
+  return state.turnOrder[state.currentTurnIndex] ?? null;
+}
+
 export type GamePhase =
   | { type: "lobby" }
-  | { type: "playingSong"; songId: string; activePlayerId: PlayerId }
+  // A song is loaded (see GameState.playback) and the active player is
+  // deciding + will eventually send CONFIRM_PLACEMENT.
+  | { type: "playingSong"; songId: string }
+  // The active player has locked in a position. Every *other* player must
+  // now explicitly vote — attempt a steal (spend a token, guess a slot) or
+  // pass — before the card can turn over; the active player has no say in
+  // when that happens at all. `votes` is in submission order (the *first*
+  // correct steal guess wins, so order matters and is preserved — a
+  // Record<PlayerId, ...> would lose it), one entry per player who has
+  // voted so far, `position: null` meaning "passed" rather than guessed.
+  // Every guess here — the active player's own placement above, and every
+  // vote's `position` — refers to the *same* timeline: the active player's.
+  // There's only one timeline in contention this round; a stealer who wins
+  // it still gets it inserted into *their own* timeline afterward (see
+  // game.ts's insertCard), but the guess itself is judged against the
+  // active player's.
   | {
-      type: "awaitingPlacement";
+      type: "stealWindow";
       songId: string;
-      activePlayerId: PlayerId;
-      /** index into the active player's timeline where they're currently proposing to insert the card */
-      activeDraftPosition: number | null;
-      /** every other connected player's current guess at the correct index, for the token/steal mechanic */
-      spectatorGuesses: Record<PlayerId, number | null>;
+      activePlacementPosition: number;
+      votes: { playerId: PlayerId; position: number | null }[];
     }
   | {
       type: "reveal";
       songId: string;
+      correctYear: number;
+      // Index into the active player's timeline — the one shared answer
+      // every vote (and the active player's own placement) was judged
+      // against.
       correctPosition: number;
       activePlacementCorrect: boolean;
+      // null covers both "nobody attempted a steal" and "everyone who did
+      // guessed wrong" — either way, nobody stole the card.
       stolenBy: PlayerId | null;
     }
   | { type: "gameOver"; winnerId: PlayerId };
 
 export interface GameSettings {
+  // First player to reach this many timeline cards wins.
   winTarget: number;
   libraryVersion: string;
 }
@@ -44,22 +111,28 @@ export interface GameState {
   players: Record<PlayerId, PlayerState>;
   turnOrder: PlayerId[];
   currentTurnIndex: number;
+  // Every songId already played this game, win or lose or stolen — checked
+  // by game.ts's song picker so the same song never comes up twice in one game.
   usedSongIds: string[];
   settings: GameSettings;
+  // null only in `lobby` — every other phase has a song loaded.
+  playback: PlaybackState | null;
 }
 
-// Intents: peer -> host. The host is the only party allowed to mutate GameState;
-// every other participant expresses what it wants to happen and waits for a STATE_SYNC.
-export type Intent =
-  | { type: "JOIN_REQUEST"; name: string }
-  | { type: "PLAY_READY" }
-  | { type: "DRAFT_POSITION_UPDATE"; position: number | null }
+// The one thing a client ever sends to change a room's state. Joining a room
+// is its own dedicated route (POST /api/rooms/:code/join), not an action,
+// since it needs to hand back a fresh playerId — every action below assumes
+// the caller already has one.
+//
+// Notably absent: a REVEAL action. Nobody ever asks for the card to turn
+// over — game.ts flips it automatically, the instant every non-active
+// player has cast a STEAL_ATTEMPT or PASS vote.
+export type GameAction =
+  | { type: "START_GAME" }
   | { type: "CONFIRM_PLACEMENT"; position: number }
-  | { type: "SPECTATOR_GUESS_UPDATE"; position: number | null }
-  | { type: "SPECTATOR_GUESS_CONFIRM"; position: number };
-
-// Events: host -> all peers (including itself, for a single local update path).
-export type GameEvent =
-  | { type: "STATE_SYNC"; state: GameState }
-  | { type: "PLAYER_JOINED"; playerId: PlayerId; name: string }
-  | { type: "PLAYER_LEFT"; playerId: PlayerId };
+  | { type: "STEAL_ATTEMPT"; position: number }
+  | { type: "PASS" }
+  | { type: "NEXT_TURN" }
+  | { type: "PLAY" }
+  | { type: "PAUSE" }
+  | { type: "SEEK"; positionSec: number };

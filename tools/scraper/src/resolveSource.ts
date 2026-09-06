@@ -14,6 +14,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { errorMessage } from "@hipster-clone/shared";
 import {
   normalize,
   wordOverlapFraction,
@@ -327,9 +328,7 @@ export async function resolveSource(
     // always prints, regardless of HIPSTER_DEBUG. Under debug, also dump the
     // full error (stack included), not just its message.
     console.warn(
-      `resolveSource: yt-dlp search failed for "${title}" by "${artist}": ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `resolveSource: yt-dlp search failed for "${title}" by "${artist}": ${errorMessage(error)}`,
     );
     if (DEBUG) {
       console.error(error);

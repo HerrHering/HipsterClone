@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { errorMessage } from "@hipster-clone/shared";
 
 // `promisify` turns execFile's callback-style API into one that returns a
 // Promise, so it can be `await`ed below instead of nesting a callback.
@@ -96,9 +97,7 @@ export async function downloadClip(
     // debug, also show the full error object (e.g. stderr/stack), not just
     // the one-line message.
     console.warn(
-      `downloadClip: yt-dlp failed for "${songId}" (${videoId}): ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `downloadClip: yt-dlp failed for "${songId}" (${videoId}): ${errorMessage(error)}`,
     );
     if (DEBUG) {
       console.error(error);

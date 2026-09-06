@@ -1,32 +1,74 @@
 import { useEffect, useState } from "react";
-import type { SongManifest } from "@hipster-clone/shared";
+import type {
+  GameAction,
+  SongManifest,
+  SongManifestEntry,
+} from "@hipster-clone/shared";
+import { errorMessage } from "@hipster-clone/shared";
+import { GameBoard } from "./game/GameBoard";
+import { HomeScreen } from "./game/HomeScreen";
+import { LobbyScreen } from "./game/LobbyScreen";
+import { createRoom, joinRoom, sendAction } from "./game/api";
+import { useGameState } from "./game/useGameState";
+import {
+  safeLocalStorageGet,
+  safeLocalStorageRemove,
+  safeLocalStorageSet,
+} from "./localStorage";
 
 type ManifestState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; manifest: SongManifest };
+  | { status: "ready"; songsById: Record<string, SongManifestEntry> };
 
-// SERVER API REQUEST — not a static file, and not a local filesystem path
-// (there's no browser-side filesystem to speak of). This URL is proxied
-// (in dev, via vite.config.ts) or served directly (in production) by
-// apps/api, which transparently downloads on first request and just serves
-// the cached file after that — the browser can't tell the difference from a
-// plain static file, it just sees an HTTP response arrive eventually.
-function audioSrc(song: SongManifest["songs"][number]): string {
-  return `/api/audio/${song.id}`;
+// Which room + seat this phone currently holds. Persisted to localStorage
+// (see below) so refreshing the page — or reopening the tab later — doesn't
+// lose your spot in an in-progress game.
+interface Seat {
+  roomCode: string;
+  playerId: string;
+}
+
+const SEAT_STORAGE_KEY = "hipster-seat";
+
+function loadStoredSeat(): Seat | null {
+  const raw = safeLocalStorageGet(SEAT_STORAGE_KEY);
+  // A malformed/corrupted stored value (e.g. hand-edited in devtools) is
+  // treated the same as "nothing stored" — same reasoning as
+  // safeLocalStorageGet returning null, just one level up: fall back
+  // quietly to the home screen rather than crash on a bad JSON.parse.
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as Seat;
+  } catch {
+    return null;
+  }
+}
+
+function storeSeat(seat: Seat | null): void {
+  if (seat) {
+    safeLocalStorageSet(SEAT_STORAGE_KEY, JSON.stringify(seat));
+  } else {
+    safeLocalStorageRemove(SEAT_STORAGE_KEY);
+  }
 }
 
 function App() {
-  const [state, setState] = useState<ManifestState>({ status: "loading" });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [cachedIds, setCachedIds] = useState<Set<string>>(new Set());
-  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [manifestState, setManifestState] = useState<ManifestState>({
+    status: "loading",
+  });
+  const [seat, setSeat] = useState<Seat | null>(() => loadStoredSeat());
+  const [homePending, setHomePending] = useState(false);
+  const [homeError, setHomeError] = useState<string | null>(null);
 
   useEffect(() => {
     // STATIC FILE, not an api request — this hits apps/web/public/manifest.json
-    // directly (served by Vite in dev, or as a plain file in a production
-    // build). It never touches apps/api at all, unlike every `/api/...` call
-    // below this point.
+    // directly, the same file the scraper writes. Still needed in the game
+    // itself: GameState only ever stores a songId + year (see protocol.ts's
+    // TimelineCard), never a title/artist, so this manifest is what turns
+    // an id back into something a player can actually read.
     fetch("/manifest.json")
       .then((res) => {
         if (!res.ok) {
@@ -34,133 +76,142 @@ function App() {
         }
         return res.json() as Promise<SongManifest>;
       })
-      .then((manifest) => setState({ status: "ready", manifest }))
+      .then((manifest) => {
+        const songsById: Record<string, SongManifestEntry> = {};
+        for (const song of manifest.songs) {
+          songsById[song.id] = song;
+        }
+        setManifestState({ status: "ready", songsById });
+      })
       .catch((error: unknown) =>
-        setState({
-          status: "error",
-          message: error instanceof Error ? error.message : String(error),
-        }),
+        setManifestState({ status: "error", message: errorMessage(error) }),
       );
     // Empty dependency array: run this fetch exactly once, when the
     // component first mounts, not on every re-render.
   }, []);
 
-  const refreshCachedIds = () => {
-    // SERVER API REQUEST — hits apps/api, which answers from the actual
-    // contents of its cache directory on disk (see cache.ts's listCachedIds).
-    fetch("/api/cached-ids")
-      .then((res) => res.json() as Promise<string[]>)
-      .then((ids) => setCachedIds(new Set(ids)))
-      .catch((error: unknown) => {
-        // The api server may not be running yet (or just hiccuped) — the
-        // cache-status badges simply won't update until the next successful
-        // call. Not worth alarming a normal session over, but worth seeing
-        // in DevTools if you're actually debugging: unlike the Node-side
-        // HIPSTER_DEBUG flag, there's no separate opt-in flag for the
-        // browser console — it's already a low-noise, open-it-if-you-need-it
-        // surface, so this just always logs there.
-        console.debug("refreshCachedIds failed:", error);
-      });
-  };
+  // Polls the current room's state on an interval once `seat` is set — see
+  // useGameState.ts. `applyState` lets an action's own response update the
+  // screen immediately, without waiting for the next poll tick.
+  const {
+    state: gameState,
+    error: pollError,
+    applyState,
+  } = useGameState(seat?.roomCode ?? null);
 
-  useEffect(refreshCachedIds, []);
+  function takeSeat(next: Seat): void {
+    storeSeat(next);
+    setSeat(next);
+  }
 
-  const deleteCached = (id: string) => {
-    // SERVER API REQUEST — asks apps/api to delete that song's cached mp3.
-    fetch(`/api/audio/${id}`, { method: "DELETE" })
-      .then(refreshCachedIds)
-      .catch((error: unknown) => {
-        console.debug(`deleteCached(${id}) failed:`, error);
-      });
-  };
+  function leaveRoom(): void {
+    storeSeat(null);
+    setSeat(null);
+  }
 
-  const setPending = (id: string, isPending: boolean) => {
-    setPendingIds((prev) => {
-      // Copy-then-mutate-the-copy, not mutate `prev` directly: React compares
-      // state by reference, so mutating the existing Set in place wouldn't
-      // be detected as a change and the UI wouldn't re-render.
-      const next = new Set(prev);
-      if (isPending) {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
-      return next;
-    });
-  };
-
-  const selectSong = (song: SongManifest["songs"][number]) => {
-    setSelectedId(song.id);
-
-    // Trigger (and await) the download explicitly here, rather than relying
-    // on the <audio> element's own request — that only starts once it's
-    // mounted below, and its load/play events are unreliable signals of
-    // exactly when the server-side download actually finished.
-    if (!cachedIds.has(song.id)) {
-      setPending(song.id, true);
-      // SERVER API REQUEST — POSTing here is what actually kicks off the
-      // yt-dlp download server-side; nothing is streamed back in the
-      // response, we just wait for it to finish, then refresh the badges.
-      fetch(`/api/audio/${song.id}/prefetch`, { method: "POST" })
-        .then(refreshCachedIds)
-        .catch((error: unknown) => {
-          console.debug(`prefetch for "${song.id}" failed:`, error);
-        })
-        .finally(() => setPending(song.id, false));
+  async function handleCreateRoom(name: string): Promise<void> {
+    setHomePending(true);
+    setHomeError(null);
+    try {
+      const created = await createRoom(name);
+      takeSeat({ roomCode: created.roomCode, playerId: created.playerId });
+      applyState(created.state);
+    } catch (error) {
+      setHomeError(errorMessage(error));
+    } finally {
+      setHomePending(false);
     }
-  };
+  }
+
+  async function handleJoinRoom(roomCode: string, name: string): Promise<void> {
+    setHomePending(true);
+    setHomeError(null);
+    try {
+      const joined = await joinRoom(roomCode, name);
+      takeSeat({ roomCode, playerId: joined.playerId });
+      applyState(joined.state);
+    } catch (error) {
+      setHomeError(errorMessage(error));
+    } finally {
+      setHomePending(false);
+    }
+  }
+
+  // Sends one action and applies the server's resulting state right away.
+  // Thrown errors are left to propagate — GameBoard's own `act()` wrapper is
+  // what catches and displays them; this function only exists to hand
+  // sendAction the seat details it needs.
+  async function handleAction(action: GameAction): Promise<void> {
+    if (!seat) {
+      return;
+    }
+    const next = await sendAction(seat.roomCode, seat.playerId, action);
+    applyState(next);
+  }
 
   return (
     <main>
       <h1>HipsterClone</h1>
 
-      {state.status === "loading" && <p>Loading songs…</p>}
+      {manifestState.status === "loading" && <p>Loading songs…</p>}
 
-      {state.status === "error" && (
+      {manifestState.status === "error" && (
         <p>
-          Couldn't load manifest.json ({state.message}). Run{" "}
+          Couldn't load manifest.json ({manifestState.message}). Run{" "}
           <code>npm run scrape</code> first.
         </p>
       )}
 
-      {state.status === "ready" && (
+      {manifestState.status === "ready" && (
         <>
-          <p>{state.manifest.songs.length} songs loaded.</p>
-          <ul>
-            {state.manifest.songs.map((song) => {
-              const isCached = cachedIds.has(song.id);
-              const isPending = pendingIds.has(song.id);
+          {!seat && (
+            <HomeScreen
+              onCreateRoom={handleCreateRoom}
+              onJoinRoom={handleJoinRoom}
+              pending={homePending}
+              error={homeError}
+            />
+          )}
 
-              return (
-                <li key={song.id}>
-                  <button onClick={() => selectSong(song)}>
-                    {song.title} — {song.artist} ({song.year})
-                  </button>{" "}
-                  {isCached ? (
-                    <>
-                      <span>cached ✓</span>{" "}
-                      <button onClick={() => deleteCached(song.id)}>
-                        remove cached copy
-                      </button>
-                    </>
-                  ) : isPending ? (
-                    <span>downloading…</span>
-                  ) : (
-                    <span>will download on first play</span>
-                  )}
-                  {selectedId === song.id && (
-                    <div>
-                      <audio
-                        controls
-                        src={audioSrc(song)}
-                        onPlay={refreshCachedIds}
-                      />
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          {seat && !gameState && (
+            <div>
+              {pollError ? (
+                <p>Couldn't reach room {seat.roomCode}: {pollError}</p>
+              ) : (
+                <p>Loading room {seat.roomCode}…</p>
+              )}
+              <button onClick={leaveRoom}>Back to home</button>
+            </div>
+          )}
+
+          {seat && gameState && (
+            <>
+              {/* A poll hiccup after we already have a good state is just
+                  noted, not treated as fatal — keep showing the last known
+                  state rather than yanking the player back to a loading
+                  screen over what might be one missed request. */}
+              {pollError && <p>(connection hiccup — showing last known state)</p>}
+
+              {gameState.phase.type === "lobby" ? (
+                <LobbyScreen
+                  roomCode={seat.roomCode}
+                  playerId={seat.playerId}
+                  state={gameState}
+                  onStartGame={() => handleAction({ type: "START_GAME" })}
+                />
+              ) : (
+                <GameBoard
+                  roomCode={seat.roomCode}
+                  playerId={seat.playerId}
+                  state={gameState}
+                  songsById={manifestState.songsById}
+                  onAction={handleAction}
+                />
+              )}
+
+              <button onClick={leaveRoom}>Leave room</button>
+            </>
+          )}
         </>
       )}
     </main>
