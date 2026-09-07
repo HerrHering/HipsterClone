@@ -85,6 +85,19 @@ export type GamePhase =
       activePlacementPosition: number;
       votes: { playerId: PlayerId; position: number | null }[];
     }
+  // Every non-active player has voted, but the active player hasn't
+  // clicked REVEAL yet — same fields as stealWindow (voting is over, so
+  // `votes` is now fixed), just a distinct phase so the client can show a
+  // "Reveal" button instead of flipping the card automatically. This is
+  // also the active player's one chance to lock in a title/artist guess
+  // (kept client-side only, see GameAction's CLAIM_GUESS_TOKEN) before
+  // seeing the real answer.
+  | {
+      type: "pendingReveal";
+      songId: string;
+      activePlacementPosition: number;
+      votes: { playerId: PlayerId; position: number | null }[];
+    }
   | {
       type: "reveal";
       songId: string;
@@ -97,6 +110,12 @@ export type GamePhase =
       // null covers both "nobody attempted a steal" and "everyone who did
       // guessed wrong" — either way, nobody stole the card.
       stolenBy: PlayerId | null;
+      // Whether the active player has already claimed the bonus token for
+      // guessing the song's title+artist correctly this round — see
+      // GameAction's CLAIM_GUESS_TOKEN. Starts false every time a reveal
+      // phase is created; guards against a retried/duplicated claim
+      // minting more than one token.
+      guessTokenClaimed: boolean;
     }
   | { type: "gameOver"; winnerId: PlayerId };
 
@@ -123,15 +142,23 @@ export interface GameState {
 // is its own dedicated route (POST /api/rooms/:code/join), not an action,
 // since it needs to hand back a fresh playerId — every action below assumes
 // the caller already has one.
-//
-// Notably absent: a REVEAL action. Nobody ever asks for the card to turn
-// over — game.ts flips it automatically, the instant every non-active
-// player has cast a STEAL_ATTEMPT or PASS vote.
 export type GameAction =
   | { type: "START_GAME" }
   | { type: "CONFIRM_PLACEMENT"; position: number }
   | { type: "STEAL_ATTEMPT"; position: number }
   | { type: "PASS" }
+  // Only the active player, and only once every other player has voted
+  // (phase "pendingReveal") — turns the card over. Deliberately a real,
+  // player-triggered action instead of an automatic phase change, so the
+  // reveal itself is a moment of suspense rather than something that just
+  // happens the instant the last vote comes in.
+  | { type: "REVEAL" }
+  // Only the active player, and only once (phase "reveal", guarded by
+  // guessTokenClaimed) — self-reported: the client already showed this
+  // player their own typed guess next to the real title/artist and asked
+  // "are they the same?" before ever sending this. The guess text itself
+  // never reaches the server; only the player's own yes/no verdict does.
+  | { type: "CLAIM_GUESS_TOKEN" }
   | { type: "NEXT_TURN" }
   | { type: "PLAY" }
   | { type: "PAUSE" }

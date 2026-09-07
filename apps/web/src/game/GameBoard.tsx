@@ -12,6 +12,7 @@ import {
   errorMessage,
 } from "@hipster-clone/shared";
 import { safeLocalStorageGet, safeLocalStorageSet } from "../localStorage";
+import { POLL_INTERVAL_MS } from "./useGameState";
 
 type SongLookup = Record<string, SongManifestEntry>;
 
@@ -120,6 +121,10 @@ function myStatusLine(state: GameState, playerId: string): string {
         ? "You voted: passed."
         : `You voted: attempted a steal at slot ${myVote.position}.`;
     }
+    case "pendingReveal":
+      return isActive
+        ? "All votes are in — reveal the card when you're ready."
+        : `Waiting for ${activeName} to reveal the card.`;
     case "reveal":
       return isActive
         ? 'Click "Next turn" when you\'re ready.'
@@ -277,6 +282,124 @@ function StealPanel({
   );
 }
 
+// Owns the reveal moment end-to-end: the active player's "Reveal" button
+// (plus their optional title/artist guess input) while votes are all in but
+// the card hasn't turned over yet, and — once it has — the outcome text and
+// the guess self-judgment prompt. `key={songId}` at the call site (see
+// GameBoard) is what resets `guessDraft`/`lockedGuess` for a new round —
+// same remount-for-reset trick as PlacementPanel/StealPanel above, not a
+// useEffect — and precisely because `songId` stays the same across the
+// pendingReveal → reveal transition *within* one round, this component
+// isn't remounted then, so `lockedGuess` survives from "Reveal was
+// clicked" through to the confirmation prompt below.
+function RevealPanel({
+  phase,
+  songsById,
+  players,
+  activeName,
+  isActive,
+  onReveal,
+  onClaimToken,
+  onNextTurn,
+}: {
+  phase: Extract<GamePhase, { type: "pendingReveal" | "reveal" }>;
+  songsById: SongLookup;
+  players: GameState["players"];
+  activeName: string;
+  isActive: boolean;
+  onReveal: () => void;
+  onClaimToken: () => void;
+  onNextTurn: () => void;
+}) {
+  const [guessDraft, setGuessDraft] = useState("");
+  const [lockedGuess, setLockedGuess] = useState<string | null>(null);
+
+  if (phase.type === "pendingReveal") {
+    // Nothing to show a non-active player here — myStatusLine and the
+    // votes list (both rendered by GameBoard, outside this component)
+    // already cover "waiting for X to reveal the card."
+    if (!isActive) {
+      return null;
+    }
+    return (
+      <div>
+        <h3>All votes are in!</h3>
+        <label>
+          Guess the title + artist (optional){" "}
+          <input
+            value={guessDraft}
+            onChange={(event) => setGuessDraft(event.target.value)}
+            placeholder="Song title — artist"
+          />
+        </label>
+        <button
+          onClick={() => {
+            // Locked in *before* the reveal request goes out — this is
+            // the player's blind guess, not one made with the answer
+            // already on screen.
+            setLockedGuess(guessDraft.trim() || null);
+            onReveal();
+          }}
+        >
+          Reveal
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <p>
+        The song was {describeSong(songsById, phase.songId)} — it belongs at
+        slot {phase.correctPosition} in {activeName}'s timeline.{" "}
+        {describeOutcome(phase, players, activeName)}
+      </p>
+
+      {/* The guess itself was never sent to the server — it only ever
+          lived in this browser's `lockedGuess` state. Comparing it to the
+          real answer, and deciding whether they're "close enough," is
+          entirely up to the active player: the server just records their
+          yes/no verdict (CLAIM_GUESS_TOKEN), guarded by guessTokenClaimed
+          so it can only happen once per round. */}
+      {isActive && lockedGuess && !phase.guessTokenClaimed && (
+        <div>
+          <p>
+            The song was {describeSong(songsById, phase.songId)}, you
+            guessed "{lockedGuess}". Are they the same?
+          </p>
+          <button
+            onClick={() => {
+              onClaimToken();
+              setLockedGuess(null);
+            }}
+          >
+            Yes, they are the same, I deserve a token!
+          </button>
+          <button onClick={() => setLockedGuess(null)}>
+            No, the songs are not the same, I don't deserve a token!
+          </button>
+        </div>
+      )}
+
+      {phase.guessTokenClaimed && (
+        <p>{activeName} earned a bonus token for that guess!</p>
+      )}
+
+      {/* Gated on `lockedGuess === null` rather than on the phase alone —
+          both the "Yes" and "No" buttons above reset lockedGuess to null
+          the instant one is clicked, so this one condition already covers
+          every case: never guessed (shows immediately), guessed and
+          answered either way (shows right after). Without this, an active
+          player who'd typed a guess could click straight past it and lose
+          their one chance to claim the bonus token — the phase moves on
+          to the next round the moment NEXT_TURN fires. */}
+      {isActive && lockedGuess === null && (
+        <button onClick={onNextTurn}>Next turn</button>
+      )}
+    </>
+  );
+}
+
 // The "open cards" summary this game is meant to have: every player's name,
 // card/token counts, and full timeline, always visible to everyone.
 function PlayerSummary({
@@ -311,7 +434,16 @@ function PlayerSummary({
 }
 
 export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Props) {
+  // Two *non-active-player* elements: `audioRef` is the real, invisible
+  // "dumb follower" that produces their actual sound (unchanged from
+  // before); `visualAudioRef` is a second, muted, click-through copy that
+  // exists purely so they can *see* the same native play/pause/scrub-bar
+  // display the active player gets, without being able to touch it. The
+  // active player gets neither ref — they get one real, native, directly
+  // interactive element instead (see the `isActive` branch below), which
+  // doesn't need programmatic corrections at all.
   const audioRef = useRef<HTMLAudioElement>(null);
+  const visualAudioRef = useRef<HTMLAudioElement>(null);
 
   // Per-device preference only — this never touches GameState or the
   // server. Only one phone is actually near a speaker; everyone else can
@@ -353,35 +485,101 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
     }
   }
 
+  // True for the duration of any PLAY/PAUSE/SEEK request the active
+  // player's own real <audio controls> element (below) sends — shown as
+  // "Syncing with server…" so a click doesn't look like it did nothing
+  // while the request is in flight. Only reflects *this device's* own
+  // round trip; whether every other player's poll has caught up too isn't
+  // something this client can see.
+  const [syncing, setSyncing] = useState(false);
+  async function mirror(action: GameAction) {
+    setSyncing(true);
+    try {
+      await act(action);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  // True from the moment the active player seeks until one full poll
+  // interval later — long enough that every other player's own poll is
+  // guaranteed to have picked up the frozen position (see game.ts's SEEK
+  // handling) before anyone's clock starts moving again. While true, the
+  // active player's own element is locked (unclickable, see the
+  // `isActive` branch below) — an *enforced* pause, not just a value
+  // that would get silently corrected back if they tried to jump the gun.
+  const [locked, setLocked] = useState(false);
+  const resumeTimerRef = useRef<number | null>(null);
+  // Set right before the one-time catch-up seek below (onLoadedMetadata)
+  // sets .currentTime — that alone fires a native 'seeked' event same as
+  // a real drag would, which would otherwise wrongly trigger the full
+  // seek-lock/auto-resume flow just from loading the page. Consumed
+  // (reset to false) the moment that one seeked event is skipped.
+  const suppressNextSeekRef = useRef(false);
+
+  // A new song always cancels any pending auto-resume left over from the
+  // previous one (and starts unlocked) — otherwise a stale timer from a
+  // seek on the *previous* song could fire a PLAY for the wrong round.
+  // Reset during render (comparing against last render's songId) rather
+  // than in an effect body — same "adjust state when a value changes"
+  // pattern used elsewhere in this file, avoiding an extra render pass.
+  const currentSongId = state.playback?.songId ?? null;
+  const [lockedForSongId, setLockedForSongId] = useState(currentSongId);
+  if (currentSongId !== lockedForSongId) {
+    setLockedForSongId(currentSongId);
+    setLocked(false);
+  }
+  // The resume timer itself is a real external resource (a browser
+  // timer), so disposing of it — on a song change or on unmount — is
+  // exactly what an effect is for.
+  useEffect(() => {
+    return () => {
+      if (resumeTimerRef.current !== null) {
+        window.clearTimeout(resumeTimerRef.current);
+        resumeTimerRef.current = null;
+      }
+    };
+  }, [currentSongId]);
+
   // Runs on every poll tick (state is a brand-new object each time
   // useGameState.ts's interval fires, whether or not anything actually
-  // changed) — nudges this phone's own <audio> element to match the
-  // server's authoritative PlaybackState. This is the "dumb follower":
-  // it never decides to play/pause/seek on its own, only reacts.
+  // changed) — nudges this phone's own follower <audio> elements to match
+  // the server's authoritative PlaybackState. This is the "dumb
+  // follower": it never decides to play/pause/seek on its own, only
+  // reacts. Loops over both non-active-player elements (the real, audible
+  // one and the visible-but-click-through display copy) identically —
+  // the active player's own element is never in this list at all (see
+  // the `isActive` branch below), since nothing but their own actions
+  // could ever change playback during their turn in the first place.
   useEffect(() => {
-    const audio = audioRef.current;
     const playback = state.playback;
-    if (!audio || !playback) {
+    if (!playback) {
       return;
     }
-    const target = currentPlaybackPositionSec(playback);
-    // Only correct real drift, not the small gap that naturally builds up
-    // between poll ticks — otherwise this fights the browser's own,
-    // perfectly fine playback clock every 1.5 seconds for no reason.
-    if (Math.abs(audio.currentTime - target) > 1) {
-      audio.currentTime = target;
-    }
-    if (playback.isPlaying && audio.paused) {
-      // Usually just a browser autoplay policy (fixed by clicking anywhere
-      // on the page first, nothing actually broken) rather than a real
-      // failure — logged to the console rather than shown on screen so a
-      // routine "hasn't interacted with the page yet" moment doesn't read
-      // as an alarming error banner.
-      void audio.play().catch((error: unknown) => {
-        console.error("audio.play() failed:", error);
-      });
-    } else if (!playback.isPlaying && !audio.paused) {
-      audio.pause();
+    for (const ref of [audioRef, visualAudioRef]) {
+      const audio = ref.current;
+      if (!audio) {
+        continue;
+      }
+      const target = currentPlaybackPositionSec(playback);
+      // Only correct real drift, not the small gap that naturally builds
+      // up between poll ticks — otherwise this fights the browser's own,
+      // perfectly fine playback clock every 1.5 seconds for no reason.
+      if (Math.abs(audio.currentTime - target) > 1) {
+        audio.currentTime = target;
+      }
+      if (playback.isPlaying && audio.paused) {
+        // Usually just a browser autoplay policy (fixed by clicking
+        // anywhere on the page first, nothing actually broken) rather
+        // than a real failure — logged to the console rather than shown
+        // on screen so a routine "hasn't interacted with the page yet"
+        // moment doesn't read as an alarming error banner.
+        void audio.play().catch((error: unknown) => {
+          console.error("audio.play() failed:", error);
+        });
+      } else if (!playback.isPlaying && !audio.paused) {
+        audio.pause();
+      }
     }
   }, [state]);
 
@@ -419,7 +617,10 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
   // `state.phase` for the rest of *this* function body, but that narrowing
   // doesn't carry into a nested arrow function, so re-deriving it as its
   // own variable up front avoids needing to repeat the check in a closure.
-  const votes = state.phase.type === "stealWindow" ? state.phase.votes : null;
+  const votes =
+    state.phase.type === "stealWindow" || state.phase.type === "pendingReveal"
+      ? state.phase.votes
+      : null;
   // Whether *this* player has already cast their vote this round — passed
   // or attempted a steal, either counts. Drives whether their voting
   // controls render at all below; the server enforces the same rule
@@ -434,7 +635,7 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
   // (possibly empty) Map, not `| null` — simpler for StealPanel's prop
   // type, and it's only ever rendered during stealWindow anyway.
   const claimedSlots = new Map<number, string>();
-  if (state.phase.type === "stealWindow") {
+  if (state.phase.type === "stealWindow" || state.phase.type === "pendingReveal") {
     claimedSlots.set(state.phase.activePlacementPosition, activeName);
     for (const vote of state.phase.votes) {
       if (vote.position !== null) {
@@ -445,14 +646,6 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
       }
     }
   }
-  // A plain number, not a nullable PlaybackState — computed once so the
-  // SEEK buttons below can just do arithmetic on it instead of each
-  // re-deriving it from `state.playback` (which would need a `!` in every
-  // closure, since narrowing `state.playback` above doesn't reach inside them).
-  const currentPositionSec = state.playback
-    ? currentPlaybackPositionSec(state.playback)
-    : 0;
-
   return (
     <div>
       <h2>Room {roomCode}</h2>
@@ -461,76 +654,177 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
         <strong>{myStatusLine(state, playerId)}</strong>
       </p>
 
-      {state.phase.type === "reveal" && (
-        <p>
-          The song was from {state.phase.correctYear} (slot{" "}
-          {state.phase.correctPosition} in {activeName}'s timeline).{" "}
-          {describeOutcome(state.phase, state.players, activeName)}
-        </p>
+      {(state.phase.type === "pendingReveal" || state.phase.type === "reveal") && (
+        // key={songId}: a fresh RevealPanel (and thus a fresh, empty guess)
+        // each round — see the component's own comment. Not remounted by
+        // the pendingReveal → reveal transition itself, since songId stays
+        // the same across those two phases within one round.
+        <RevealPanel
+          key={state.phase.songId}
+          phase={state.phase}
+          songsById={songsById}
+          players={state.players}
+          activeName={activeName}
+          isActive={isActive}
+          onReveal={() => act({ type: "REVEAL" })}
+          onClaimToken={() => act({ type: "CLAIM_GUESS_TOKEN" })}
+          onNextTurn={() => act({ type: "NEXT_TURN" })}
+        />
       )}
 
       {state.playback && (
         <div>
-          <audio
-            ref={audioRef}
-            src={audioSrc(state.playback.songId)}
-            muted={muted}
-            // "auto": ask the browser to start fetching immediately once a
-            // src is set, rather than waiting for an explicit play() (the
-            // default "metadata" preload would otherwise delay the very
-            // request that kicks off a slow yt-dlp download server-side,
-            // which is exactly the case worth surfacing early).
-            preload="auto"
-            // These fire on this phone's own <audio> element regardless of
-            // GameState — they're the only source of truth for "what is
-            // *my* fetch/playback actually doing right now." A source
-            // change (new song) naturally fires onLoadStart again on its
-            // own, so audioStatus resets itself without any extra effect.
-            onLoadStart={() => setAudioStatus("loading")}
-            onWaiting={() => setAudioStatus("buffering")}
-            onPlaying={() => setAudioStatus("playing")}
-            onPause={() => setAudioStatus("paused")}
-            onCanPlay={() =>
-              // Only meaningful coming from "loading": data's ready, but
-              // nothing's asked to play yet, so it's sitting paused — not
-              // "loading" anymore. Leave "buffering"/"playing" alone here;
-              // their own events (onPlaying) already cover resuming.
-              setAudioStatus((current) => (current === "loading" ? "paused" : current))
-            }
-          />
-          <span>
-            {audioStatus === "loading" && "Loading song…"}
-            {audioStatus === "buffering" && "Buffering…"}
-            {audioStatus === "playing" && "Playing"}
-            {audioStatus === "paused" && "Paused"}
-          </span>
-          <button onClick={() => setMuted((prev) => !prev)}>
-            {muted ? "Unmute for me" : "Mute for me"}
-          </button>
-          {/* Only the active player gets transport controls at all — the
-              server enforces this too (see game.ts's PLAY/PAUSE/SEEK
-              handling), this is just so nobody else even sees a button
-              that would be rejected anyway. */}
-          {isActive && (
+          {isActive ? (
+            // The active player gets one real, native, directly
+            // interactive element — no separate invisible twin, no
+            // separate "Mute for me" button. Nothing but their own
+            // actions can ever change playback during their turn (the
+            // server rejects anyone else's PLAY/PAUSE/SEEK), so there's
+            // no other "truth" for this device to follow — the one
+            // exception is the short window right after *this player's
+            // own* seek, until everyone else has had a chance to catch
+            // up, handled explicitly below via `locked`.
             <>
-              <button
-                onClick={() =>
-                  act(state.playback?.isPlaying ? { type: "PAUSE" } : { type: "PLAY" })
+              <audio
+                controls
+                src={audioSrc(state.playback.songId)}
+                preload="auto"
+                // Enforces the pause below: with no pointer events and no
+                // keyboard focus, there is no native control left to
+                // click to jump the gun — not just a value that would get
+                // silently corrected back if they tried.
+                style={locked ? { pointerEvents: "none" } : undefined}
+                tabIndex={locked ? -1 : undefined}
+                // One-time catch-up, not a recurring correction: a fresh
+                // <audio> element (this branch only exists at all while
+                // `isActive`, so it's freshly created every time this
+                // player's turn starts, most notably right after a page
+                // refresh mid-turn) otherwise has no idea the server's
+                // playback might already be mid-song and/or playing — it
+                // would just sit at 0:00, paused, regardless. Fires again
+                // at the *start* of every later turn too, but harmlessly:
+                // a fresh turn's server state is already positionSec 0 /
+                // paused (see game.ts's loadNextSong), exactly matching a
+                // freshly-loaded element's own default — nothing to catch
+                // up to. `suppressNextSeekRef` stops the .currentTime
+                // write below from being mistaken for a real user seek.
+                onLoadedMetadata={(event) => {
+                  const playback = state.playback;
+                  if (!playback) {
+                    return;
+                  }
+                  const audio = event.currentTarget;
+                  suppressNextSeekRef.current = true;
+                  audio.currentTime = currentPlaybackPositionSec(playback);
+                  if (playback.isPlaying) {
+                    void audio.play().catch((error: unknown) => {
+                      console.error("audio.play() failed:", error);
+                    });
+                  }
+                }}
+                onPlay={() => mirror({ type: "PLAY" })}
+                onPause={() => mirror({ type: "PAUSE" })}
+                onSeeked={async (event) => {
+                  // The one-time catch-up above also fires a native
+                  // 'seeked' event (setting .currentTime always does,
+                  // even programmatically) — without this check, loading
+                  // the page would wrongly trigger the full lock/mirror/
+                  // auto-resume flow below, as if the player had dragged
+                  // the scrub bar themselves.
+                  if (suppressNextSeekRef.current) {
+                    suppressNextSeekRef.current = false;
+                    return;
+                  }
+                  // A seek always freezes here too, matching game.ts's own
+                  // SEEK handling: pause immediately, mirror the seek, then
+                  // hold the pause for one full poll interval — long
+                  // enough that every other player's own poll is
+                  // guaranteed to have picked up the frozen position —
+                  // before resuming (only if it had actually been
+                  // playing) so everyone's clock starts moving together
+                  // from the exact same instant.
+                  const audio = event.currentTarget;
+                  const wasPlaying = !audio.paused;
+                  audio.pause();
+                  setLocked(true);
+                  await mirror({ type: "SEEK", positionSec: audio.currentTime });
+                  resumeTimerRef.current = window.setTimeout(() => {
+                    setLocked(false);
+                    if (wasPlaying) {
+                      void audio.play().catch((error: unknown) => {
+                        console.error("audio.play() failed:", error);
+                      });
+                    }
+                  }, POLL_INTERVAL_MS);
+                }}
+              />
+              <br />
+              {locked ? (
+                <span>Paused — waiting for everyone to catch up…</span>
+              ) : (
+                syncing && <span>Syncing with server…</span>
+              )}
+            </>
+          ) : (
+            // Everyone else: the real, invisible, "dumb follower" element
+            // (unchanged — actual sound, per-device "Mute for me", the
+            // Loading/Buffering/Playing/Paused text), plus a second,
+            // purely decorative native widget so the same timestamp/
+            // paused-or-playing state is visible, not just described in
+            // text. Always `muted` (hardcoded, never toggleable — it can
+            // never itself make sound) and click/keyboard-through, so
+            // there's no way to interact with it at all.
+            <>
+              <audio
+                ref={audioRef}
+                src={audioSrc(state.playback.songId)}
+                muted={muted}
+                // "auto": ask the browser to start fetching immediately
+                // once a src is set, rather than waiting for an explicit
+                // play() (the default "metadata" preload would otherwise
+                // delay the very request that kicks off a slow yt-dlp
+                // download server-side, which is exactly the case worth
+                // surfacing early).
+                preload="auto"
+                // These fire on this phone's own <audio> element
+                // regardless of GameState — they're the only source of
+                // truth for "what is *my* fetch/playback actually doing
+                // right now." A source change (new song) naturally fires
+                // onLoadStart again on its own, so audioStatus resets
+                // itself without any extra effect.
+                onLoadStart={() => setAudioStatus("loading")}
+                onWaiting={() => setAudioStatus("buffering")}
+                onPlaying={() => setAudioStatus("playing")}
+                onPause={() => setAudioStatus("paused")}
+                onCanPlay={() =>
+                  // Only meaningful coming from "loading": data's ready,
+                  // but nothing's asked to play yet, so it's sitting
+                  // paused — not "loading" anymore. Leave
+                  // "buffering"/"playing" alone here; their own events
+                  // (onPlaying) already cover resuming.
+                  setAudioStatus((current) =>
+                    current === "loading" ? "paused" : current,
+                  )
                 }
-              >
-                {state.playback.isPlaying ? "Pause" : "Play"}
-              </button>
-              <button
-                onClick={() =>
-                  act({ type: "SEEK", positionSec: Math.max(0, currentPositionSec - 5) })
-                }
-              >
-                -5s
-              </button>
-              <button
-                onClick={() => act({ type: "SEEK", positionSec: currentPositionSec + 5 })}
-              >
-                +5s
+              />
+              <audio
+                ref={visualAudioRef}
+                controls
+                muted
+                src={audioSrc(state.playback.songId)}
+                preload="auto"
+                style={{ pointerEvents: "none" }}
+                tabIndex={-1}
+              />
+              <br />
+              <span>
+                {audioStatus === "loading" && "Loading song…"}
+                {audioStatus === "buffering" && "Buffering…"}
+                {audioStatus === "playing" && "Playing"}
+                {audioStatus === "paused" && "Paused"}
+              </span>
+              <button onClick={() => setMuted((prev) => !prev)}>
+                {muted ? "Unmute for me" : "Mute for me"}
               </button>
             </>
           )}
@@ -570,26 +864,36 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
           />
         )}
 
-      {/* The active player already locked in their own placement and
-          doesn't vote — but they shouldn't lose sight of the board while
-          everyone else does. Same SlotPicker, same live claimedSlots, just
-          with no `onSelect` at all: every button renders disabled, so this
-          is purely something to watch, not touch. */}
-      {state.phase.type === "stealWindow" && isActive && activePlayer && (
-        <div>
-          <h3>Watching the steal window</h3>
-          <SlotPicker
-            timeline={activePlayer.timeline}
-            songsById={songsById}
-            claimedSlots={claimedSlots}
-          />
-        </div>
-      )}
+      {/* While voting's still open, the active player has no vote of their
+          own but shouldn't lose sight of the board while everyone else
+          decides — that's the "stealWindow && isActive" half. Once voting
+          closes ("pendingReveal"), every slot is now final, so the board
+          becomes read-only for *everyone*, not just the active player —
+          there's no more voting left to spoil by looking. Same SlotPicker,
+          same live claimedSlots, just with no `onSelect` at all: every
+          button renders disabled, so this is purely something to watch,
+          not touch. */}
+      {((state.phase.type === "stealWindow" && isActive) ||
+        state.phase.type === "pendingReveal") &&
+        activePlayer && (
+          <div>
+            <h3>
+              {state.phase.type === "pendingReveal"
+                ? "Final placements"
+                : "Watching the steal window"}
+            </h3>
+            <SlotPicker
+              timeline={activePlayer.timeline}
+              songsById={songsById}
+              claimedSlots={claimedSlots}
+            />
+          </div>
+        )}
 
-      {/* No REVEAL action/button exists at all — game.ts flips the card on
-          its own the instant every non-active player below has voted. This
-          is just a fully-open readout of where that stands, since there's
-          no reason to hide it in an open-card game. */}
+      {/* A fully-open readout of where voting stands, covering both
+          "stealWindow" (still voting) and "pendingReveal" (voting done,
+          waiting on the active player's Reveal) — there's no reason to
+          hide it in an open-card game. */}
       {votes && (
         <div>
           <h3>Waiting on votes</h3>
@@ -614,13 +918,6 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
           </ul>
         </div>
       )}
-      {/* Only the active player may advance the turn — enforced server-side
-          too (see game.ts's NEXT_TURN case), this just keeps the button
-          from appearing at all for anyone it would be rejected for. */}
-      {state.phase.type === "reveal" && isActive && (
-        <button onClick={() => act({ type: "NEXT_TURN" })}>Next turn</button>
-      )}
-
       {actionError && <p>{actionError}</p>}
 
       <PlayerSummary state={state} songsById={songsById} highlightId={activeId} />

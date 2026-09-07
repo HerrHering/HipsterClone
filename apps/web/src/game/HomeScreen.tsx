@@ -1,6 +1,9 @@
 import { useState } from "react";
 
 interface Props {
+  // Whatever App.tsx already had remembered in localStorage from the last
+  // time this phone created or joined a room — "" if it's never happened.
+  initialName: string;
   onCreateRoom: (name: string) => void;
   onJoinRoom: (roomCode: string, name: string) => void;
   pending: boolean;
@@ -10,10 +13,17 @@ interface Props {
 // The very first screen: pick a name, then either create a fresh room or
 // join one a friend already created. Nothing here talks to the server
 // directly — App.tsx owns that, and just passes down what to call.
-export function HomeScreen({ onCreateRoom, onJoinRoom, pending, error }: Props) {
+export function HomeScreen({
+  initialName,
+  onCreateRoom,
+  onJoinRoom,
+  pending,
+  error,
+}: Props) {
   // Local, un-submitted form state — only App.tsx's state (roomCode,
-  // playerId) actually matters once a room exists.
-  const [name, setName] = useState("");
+  // playerId) actually matters once a room exists. Seeded from
+  // `initialName` so returning players don't have to retype it.
+  const [name, setName] = useState(initialName);
   const [roomCode, setRoomCode] = useState("");
 
   const trimmedName = name.trim();

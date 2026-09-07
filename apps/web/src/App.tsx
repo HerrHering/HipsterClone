@@ -30,6 +30,20 @@ interface Seat {
 }
 
 const SEAT_STORAGE_KEY = "hipster-seat";
+const NAME_STORAGE_KEY = "hipster-name";
+
+// Unlike the seat, a stored name is never removed — there's no "clear your
+// name" action, it should just keep coming back pre-filled the next time
+// this phone joins or creates a room.
+function loadStoredName(): string {
+  return safeLocalStorageGet(NAME_STORAGE_KEY) ?? "";
+}
+
+function storeName(name: string): void {
+  if (name) {
+    safeLocalStorageSet(NAME_STORAGE_KEY, name);
+  }
+}
 
 function loadStoredSeat(): Seat | null {
   const raw = safeLocalStorageGet(SEAT_STORAGE_KEY);
@@ -60,6 +74,7 @@ function App() {
     status: "loading",
   });
   const [seat, setSeat] = useState<Seat | null>(() => loadStoredSeat());
+  const [storedName] = useState<string>(() => loadStoredName());
   const [homePending, setHomePending] = useState(false);
   const [homeError, setHomeError] = useState<string | null>(null);
 
@@ -110,6 +125,7 @@ function App() {
   }
 
   async function handleCreateRoom(name: string): Promise<void> {
+    storeName(name);
     setHomePending(true);
     setHomeError(null);
     try {
@@ -124,6 +140,7 @@ function App() {
   }
 
   async function handleJoinRoom(roomCode: string, name: string): Promise<void> {
+    storeName(name);
     setHomePending(true);
     setHomeError(null);
     try {
@@ -166,6 +183,7 @@ function App() {
         <>
           {!seat && (
             <HomeScreen
+              initialName={storedName}
               onCreateRoom={handleCreateRoom}
               onJoinRoom={handleJoinRoom}
               pending={homePending}

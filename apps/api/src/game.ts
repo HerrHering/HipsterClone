@@ -171,15 +171,16 @@ function everyoneHasVoted(
   return votes.length >= nonActiveCount;
 }
 
-// Resolves a finished steal window into a reveal (or gameOver): every
-// vote's `position` — and the active player's own earlier placement — was a
-// guess at the same single thing, "where does this song fit into the active
-// player's timeline," so that's computed exactly once here and reused for
-// both checks.
+// Resolves a completed voting round (phase "pendingReveal") into a reveal
+// (or gameOver): every vote's `position` — and the active player's own
+// earlier placement — was a guess at the same single thing, "where does
+// this song fit into the active player's timeline," so that's computed
+// exactly once here and reused for both checks. Only ever called from the
+// REVEAL action below, once the active player asks for it.
 async function finishRound(
   state: GameState,
   activeId: string,
-  phase: Extract<GamePhase, { type: "stealWindow" }>,
+  phase: Extract<GamePhase, { type: "pendingReveal" }>,
 ): Promise<void> {
   const catalog = (await loadManifest()).songs;
   const song = catalog.find((entry) => entry.id === phase.songId);
@@ -220,30 +221,30 @@ async function finishRound(
       correctPosition,
       activePlacementCorrect,
       stolenBy,
+      guessTokenClaimed: false,
     };
   }
 }
 
-// Called after recording a vote — flips the card the instant the *last*
-// non-active player has voted, and does nothing otherwise. Nobody ever
-// explicitly asks for this to happen (there's no REVEAL action); it's a
-// direct consequence of everyone having voted, never a button the active
-// player (or anyone else) can press early.
-async function maybeFinishRound(
+// Called after recording a vote — the instant the *last* non-active player
+// has voted, moves the phase from "stealWindow" to "pendingReveal" (and
+// does nothing otherwise). This no longer resolves the round itself — it
+// just makes the "everyone's voted, waiting on the active player" moment a
+// real, distinct phase for REVEAL to act on below, instead of an automatic
+// jump straight to the outcome.
+function maybeCompleteVoting(
   state: GameState,
   phase: Extract<GamePhase, { type: "stealWindow" }>,
-): Promise<void> {
+): void {
   if (!everyoneHasVoted(state, phase.votes)) {
     return;
   }
-  // `!`: currentPlayerId only returns null when turnOrder is empty, which
-  // is only ever true in the lobby (START_GAME fills it via
-  // shuffledPlayerIds, and nothing ever shrinks it afterward). Reaching a
-  // `stealWindow` at all already proves the game has started, so there's
-  // always a real active player here — TypeScript just can't see that
-  // invariant from currentPlayerId's own `PlayerId | null` return type.
-  const activeId = currentPlayerId(state)!;
-  await finishRound(state, activeId, phase);
+  state.phase = {
+    type: "pendingReveal",
+    songId: phase.songId,
+    activePlacementPosition: phase.activePlacementPosition,
+    votes: phase.votes,
+  };
 }
 
 // Fisher-Yates: swaps each element with a random one at-or-before it,
@@ -383,7 +384,7 @@ export async function applyAction(
       // that a wrong guess still costs you the token.
       player.tokens -= 1;
       phase.votes.push({ playerId, position: action.position });
-      await maybeFinishRound(state, phase);
+      maybeCompleteVoting(state, phase);
       break;
     }
 
@@ -400,7 +401,33 @@ export async function applyAction(
         throw new Error("already voted this round");
       }
       phase.votes.push({ playerId, position: null });
-      await maybeFinishRound(state, phase);
+      maybeCompleteVoting(state, phase);
+      break;
+    }
+
+    case "REVEAL": {
+      if (phase.type !== "pendingReveal") {
+        throw new Error(`can't reveal during "${phase.type}"`);
+      }
+      if (playerId !== activeId) {
+        throw new Error("only the active player can reveal the card");
+      }
+      await finishRound(state, activeId, phase);
+      break;
+    }
+
+    case "CLAIM_GUESS_TOKEN": {
+      if (phase.type !== "reveal") {
+        throw new Error(`can't claim a guess token during "${phase.type}"`);
+      }
+      if (playerId !== activeId) {
+        throw new Error("only the active player can claim a guess token");
+      }
+      if (phase.guessTokenClaimed) {
+        throw new Error("a guess token was already claimed this round");
+      }
+      phase.guessTokenClaimed = true;
+      requirePlayer(state, activeId).tokens += 1;
       break;
     }
 
@@ -444,7 +471,18 @@ export async function applyAction(
         state.playback.isPlaying = false;
         state.playback.updatedAt = Date.now();
       } else {
+        // A seek always freezes the timestamp exactly where it points,
+        // rather than preserving isPlaying: if it kept playing, every
+        // follower's own network/poll delay before it actually applies
+        // this would get silently baked into where they land — whoever's
+        // slowest to find out ends up furthest from the second the active
+        // player actually pointed at. Freezing it means every client, no
+        // matter when it catches up, computes exactly `positionSec` (no
+        // elapsed-time term applies while paused) — a hard, deterministic
+        // sync point. A plain PLAY (unchanged) is what starts the clock
+        // again, together, for everyone, from this exact position.
         state.playback.positionSec = action.positionSec;
+        state.playback.isPlaying = false;
         state.playback.updatedAt = Date.now();
       }
       break;

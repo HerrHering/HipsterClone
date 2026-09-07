@@ -6,7 +6,10 @@ import { fetchState } from "./api";
 // How often every phone re-asks the server "what's the state now?" No
 // WebSocket, no push — just the same plain-fetch-on-a-timer approach
 // App.tsx already used for cache-status badges, applied to the whole game.
-const POLL_INTERVAL_MS = 1500;
+// Exported so GameBoard.tsx can size its own "wait for everyone to catch
+// up" delay (after a seek) off the same number, instead of a second,
+// easily-drifting magic constant.
+export const POLL_INTERVAL_MS = 1500;
 
 /**
  * Polls a room's state on an interval while `roomCode` is set, and stops
