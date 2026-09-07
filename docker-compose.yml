@@ -11,7 +11,13 @@ services:
       # a cookies.txt exported ahead of time (see the deploy runbook).
       YTDLP_COOKIES_FILE: /app/cookies.txt
     volumes:
-      - ./cookies.txt:/app/cookies.txt:ro
+      # Not :ro: yt-dlp's --cookies flag treats this file as a live cookie
+      # jar, not just an input — it rewrites it (refreshed/rotated cookies)
+      # every time it exits. A read-only mount makes that write fail with
+      # "Read-only file system", which crashes yt-dlp even after a
+      # successful download, so downloadClip.ts reports every song as
+      # failed.
+      - ./cookies.txt:/app/cookies.txt
       # Persists downloaded songs across restarts/rebuilds — without
       # this, every `docker compose up --build` would re-download
       # everything from scratch.

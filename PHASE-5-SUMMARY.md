@@ -204,7 +204,7 @@ services:
       PORT: "5174"
       YTDLP_COOKIES_FILE: /app/cookies.txt
     volumes:
-      - ./cookies.txt:/app/cookies.txt:ro
+      - ./cookies.txt:/app/cookies.txt
       - ./apps/api/data/cache:/app/apps/api/data/cache
     restart: unless-stopped
 ```
@@ -223,8 +223,14 @@ by hand, it's all written down once and started with `docker compose up`.
   `downloadClip.ts` to use a mounted cookie file instead of trying (and
   failing) to read a real browser's profile.
 - `volumes:` — the `host-path:container-path` pairs from §1. The
-  `:ro` on the cookies line means "read-only" — the container can read
-  it but never modify or delete it.
+  cookies mount is deliberately **not** `:ro`: yt-dlp's `--cookies` flag
+  treats the file as a live jar, not just an input — it rewrites it
+  (rotated/refreshed cookies) every time it exits, even after a
+  successful download. A read-only mount here makes that final write
+  fail with "Read-only file system", which crashes yt-dlp on every
+  single run and makes `downloadClip.ts` report every song as failed —
+  a real bug hit and fixed after Phase 5's initial `:ro` mount turned
+  out to be incompatible with how yt-dlp actually uses this file.
 - `restart: unless-stopped` — if the container crashes, or the desktop
   reboots, Docker starts it again automatically, without you needing to
   SSH in and run anything by hand.
@@ -323,7 +329,7 @@ without actually owning a domain.
    export — it already knows how to read a real browser's cookie
    database, so no separate browser extension is needed:
    ```
-   yt-dlp --cookies-from-browser firefox --cookies cookies.txt --skip-download \
+   yt-dlp --js-runtimes node --remote-components ejs:github --cookies-from-browser firefox --cookies cookies.txt --skip-download \
      "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
    ```
    What each piece does: `--cookies-from-browser firefox` is the same
