@@ -136,6 +136,14 @@ export interface GameState {
   settings: GameSettings;
   // null only in `lobby` — every other phase has a song loaded.
   playback: PlaybackState | null;
+  // A running, capped (see game.ts's MAX_LOG_ENTRIES) history of
+  // human-readable event lines — "Alice joined the room," "Bob placed a
+  // card" — in the order they happened, oldest first. Deliberately plain
+  // strings rather than a structured {id, timestamp, kind} shape: nothing
+  // renders these interactively, so there's nothing that structure would
+  // buy over a client just listing them out. Never mentions a song's
+  // title/artist before its `reveal` phase, so it can't spoil anything.
+  log: string[];
 }
 
 // The one thing a client ever sends to change a room's state. Joining a room

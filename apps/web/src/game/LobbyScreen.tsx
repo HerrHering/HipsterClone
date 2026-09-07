@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { GameState } from "@hipster-clone/shared";
 import { errorMessage } from "@hipster-clone/shared";
+import { EventLog } from "./EventLog";
 
 interface Props {
   roomCode: string;
@@ -32,24 +33,38 @@ export function LobbyScreen({ roomCode, playerId, state, onStartGame }: Props) {
   }
 
   return (
-    <div>
-      <h2>Room {roomCode}</h2>
-      <p>You are <strong>{me?.name ?? playerId}</strong>.</p>
-      <p>Tell your friends to join with this code.</p>
+    <div className="stack">
+      <div className="card stack-sm">
+        <h2>Room {roomCode}</h2>
+        <p>
+          You are <strong>{me?.name ?? playerId}</strong>.
+        </p>
+        <p className="divider">Tell your friends to join with this code.</p>
 
-      <ul>
-        {players.map((player) => (
-          <li key={player.id}>{player.name}</li>
-        ))}
-      </ul>
+        <div className="player-grid">
+          {players.map((player) => (
+            <div key={player.id} className="player-card">
+              <span className="player-card-name">{player.name}</span>
+            </div>
+          ))}
+        </div>
 
-      <button disabled={players.length < MIN_PLAYERS} onClick={handleStartGame}>
-        Start game
-      </button>
-      {players.length < MIN_PLAYERS && (
-        <p>Need at least {MIN_PLAYERS} players to start.</p>
-      )}
-      {startError && <p>{startError}</p>}
+        <button
+          className="btn btn-primary"
+          disabled={players.length < MIN_PLAYERS}
+          onClick={handleStartGame}
+        >
+          Start game
+        </button>
+        {players.length < MIN_PLAYERS && (
+          <span className="badge badge-muted">
+            Need at least {MIN_PLAYERS} players to start.
+          </span>
+        )}
+        {startError && <p className="alert">{startError}</p>}
+      </div>
+
+      <EventLog entries={state.log} />
     </div>
   );
 }

@@ -11,6 +11,39 @@
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
+  /* Stage 4 (UX polish) additions below — extending, not replacing, the
+     theme above so the existing light/dark split keeps working for free. */
+  --surface: #fff;
+  --surface-2: var(--code-bg);
+  --success: #1a9c53;
+  --danger: #d1293d;
+  --danger-bg: rgba(209, 41, 61, 0.1);
+  --warning: #b5720a;
+  --warning-bg: rgba(181, 114, 10, 0.12);
+  --warning-border: rgba(181, 114, 10, 0.5);
+  --muted-text: #8b8591;
+  /* A clearly-visible neutral border for interactive elements (plain
+     buttons, inputs) — --border alone is too faint once the element it
+     outlines sits on a same-toned card/surface background (e.g. the
+     "Join room" button on a white card in light mode). */
+  --border-strong: #b9b7bf;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 20px;
+  --space-5: 28px;
+  --space-6: 40px;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 999px;
+
+  --font-sm: 0.85rem;
+  --font-base: 1rem;
+  --font-lg: 1.15rem;
+  --font-xl: 1.4rem;
+
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
@@ -43,6 +76,22 @@
     --social-bg: rgba(47, 48, 58, 0.5);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+
+    --surface: #1c1d25;
+    --surface-2: var(--code-bg);
+    --success: #4ade80;
+    --danger: #f87171;
+    --danger-bg: rgba(248, 113, 113, 0.15);
+    --warning: #facc15;
+    --warning-bg: rgba(250, 204, 21, 0.15);
+    --warning-border: rgba(250, 204, 21, 0.5);
+    /* Lightened from #6b7280 — that value was too close in luminance to
+       --surface/--surface-2/--code-bg (all ~#1c1d25-#1f2028), so muted
+       text (the divider, badge-muted, a timeline list inside a
+       player-card) was blending into the background instead of just
+       reading as de-emphasized. */
+    --muted-text: #8b93a1;
+    --border-strong: #454854;
   }
 
   #social .button-icon {
@@ -95,11 +144,52 @@ p {
   margin: 0;
 }
 
+/* SlotPicker's row of gap buttons (GameBoard.tsx) — a horizontally
+   scrolling row of pills rather than a wrapping block list, so a timeline
+   with many cards stays a single tappable row on a phone instead of
+   growing tall and pushing the rest of the board down. See the "General
+   overflow rule" in the Stage 4 plan: this is the timeline's own
+   scrollable region. */
+.slot-picker {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-2) 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.slot {
+  flex: 0 0 auto;
+  min-height: 44px;
+  white-space: normal;
+  max-width: 220px;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  /* --border-strong (not --border) and --text-h (not --text) — same fix
+     as .btn: a clickable slot needs a border/text strong enough to read
+     as tappable, not the same faint look a claimed/disabled one gets. */
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-h);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+/* Genuinely non-interactive (claimed, or the whole board is a read-only
+   "watching" view with no onSelect at all) — dimmed so it visually reads
+   as "look, don't touch," distinct from the full-strength look above. */
+.slot:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* The slot a player has currently picked (but not yet confirmed/attempted)
    in PlacementPanel/StealPanel — see GameBoard.tsx's SlotPicker, which
-   already applies this class, it just had no style to show for it. Uses
-   the same --accent tokens the rest of the theme already defines for both
-   light and dark mode, so this needs no theme-specific rule of its own. */
+   already applies this class. Uses the same --accent tokens the rest of
+   the theme already defines for both light and dark mode, so this needs
+   no theme-specific rule of its own. */
 .slot-selected {
   border: 2px solid var(--accent);
   background: var(--accent-bg);
@@ -133,4 +223,319 @@ code {
   line-height: 135%;
   padding: 4px 8px;
   background: var(--code-bg);
+}
+
+/* ---------------------------------------------------------------------
+   Stage 4: UX polish — layout shell, cards, buttons, forms, badges.
+   Everything below is additive: the rules above (tokens, h1/h2/p, code,
+   slot-*) are unchanged and still used exactly as before.
+   --------------------------------------------------------------------- */
+
+/* The padded, left-aligned content area for every in-game screen — #root
+   above still owns the page-wide centered frame/border; this is what sits
+   inside it once there's an actual name/board/form to show, since centered
+   text reads badly for lists, buttons, and cards. */
+.app-shell {
+  text-align: left;
+  padding: 0 var(--space-4) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+  box-sizing: border-box;
+}
+
+/* Generic vertical rhythm for a screen's top-level children — used instead
+   of bespoke margins on every heading/paragraph/button. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* The one reusable panel style — used for the home form, the lobby, every
+   placement/steal/reveal panel, the now-playing widget, the scoreboard,
+   and the event log, so the whole app reads as "a page made of cards"
+   rather than a pile of unrelated unstyled sections. */
+.card {
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  padding: var(--space-4);
+  box-sizing: border-box;
+}
+
+.card > h3:first-child,
+.card > h2:first-child {
+  margin-top: 0;
+}
+
+/* A prominent "what do I do right now" banner (GameBoard's myStatusLine) —
+   deliberately the most visually loud thing on a phone screen, since
+   that's the one line a player actually needs to read every time. */
+.status-banner {
+  text-align: left;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-h);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  border-color: var(--accent-border);
+  background: var(--accent);
+  color: #fff;
+}
+.btn-outline {
+  background: transparent;
+}
+/* For an action that costs something and might fail (attempting a
+   steal) — visually distinct from .btn-primary's "safe, forward
+   progress" purple, so the risk is obvious before tapping. */
+.btn-warning {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+/* For an action that leaves/exits something — never destructive to game
+   state (rooms just sit in memory either way), but still a "step back,"
+   so it reads differently from every forward-progress button. */
+.btn-danger-outline {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+/* Stacked, full-width, easy-to-tap buttons on a phone; back to
+   inline-sized once there's room for them side by side. */
+.btn-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+@media (min-width: 480px) {
+  .btn-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: left;
+}
+.field input {
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+  box-sizing: border-box;
+}
+.field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.alert {
+  text-align: left;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: var(--space-2) var(--space-3);
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-lg);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  background: var(--code-bg);
+  color: var(--text);
+  white-space: nowrap;
+}
+.badge-accent {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+}
+.badge-muted {
+  background: var(--code-bg);
+  color: var(--muted-text);
+}
+/* Tokens are the resource steals cost — giving the count its own color
+   (distinct from the plain-gray card-count badge) makes it scannable at
+   a glance across the whole scoreboard, not just readable on close look. */
+.badge-token {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.divider {
+  text-align: center;
+  color: var(--muted-text);
+  font-size: var(--font-sm);
+}
+
+/* The main-column-plus-sidebar split (board + scoreboard/event log) —
+   single column on a phone, two columns once there's enough width for a
+   320px sidebar to make sense next to the board. */
+.game-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+@media (min-width: 860px) {
+  .game-layout {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+}
+.main-column,
+.side-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The scoreboard (PlayerSummary) — a responsive card grid instead of a
+   plain list. Past a point a phone-width screen can't fit even one
+   comfortably-sized card per row without shrinking text, so beyond a
+   handful of players it becomes its own horizontally-scrolling row
+   instead (the "General overflow rule": scroll it, don't cramp it). */
+.player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-3);
+}
+@media (max-width: 480px) {
+  .player-grid {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(200px, 1fr);
+    grid-template-columns: none;
+    overflow-x: auto;
+    padding-bottom: var(--space-2);
+    -webkit-overflow-scrolling: touch;
+  }
+}
+.player-card {
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.player-card.is-active {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+.player-card-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-weight: 600;
+  color: var(--text-h);
+}
+.player-card-counts {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+.player-card ul {
+  margin: var(--space-2) 0 0;
+  padding-left: 18px;
+  font-size: var(--font-sm);
+  color: var(--muted-text);
+}
+
+/* The activity feed (EventLog.tsx). A <details> element rather than any
+   JS-driven show/hide: collapsed by default so it doesn't push the board
+   off a phone screen, forced open below via a plain CSS override of the
+   browser's own "closed details hides its children" rule once there's
+   room for it as a permanent sidebar panel. */
+.event-log summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-h);
+  list-style: none;
+}
+.event-log summary::-webkit-details-marker {
+  display: none;
+}
+.event-log summary::after {
+  content: "▾";
+  float: right;
+  color: var(--muted-text);
+  transition: transform 0.15s ease;
+}
+.event-log[open] summary::after {
+  transform: rotate(180deg);
+}
+.event-log ul {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.event-log li {
+  font-size: var(--font-sm);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-2);
+}
+.event-log li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+@media (min-width: 860px) {
+  .event-log summary::after {
+    display: none;
+  }
+  .event-log:not([open]) > *:not(summary) {
+    display: block !important;
+  }
 }

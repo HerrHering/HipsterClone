@@ -29,33 +29,31 @@ export function HomeScreen({
   const trimmedName = name.trim();
 
   return (
-    <div>
+    <div className="card stack">
       <h2>Play</h2>
-      <p>
-        <label>
-          Your name{" "}
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Alice"
-          />
-        </label>
-      </p>
 
-      <p>
-        <button
-          disabled={!trimmedName || pending}
-          onClick={() => onCreateRoom(trimmedName)}
-        >
-          Create a new room
-        </button>
-      </p>
+      <label className="field">
+        <span>Your name</span>
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Alice"
+        />
+      </label>
 
-      <p>— or —</p>
+      <button
+        className="btn btn-primary"
+        disabled={!trimmedName || pending}
+        onClick={() => onCreateRoom(trimmedName)}
+      >
+        Create a new room
+      </button>
 
-      <p>
-        <label>
-          Room code{" "}
+      <p className="divider">— or —</p>
+
+      <div className="stack-sm">
+        <label className="field">
+          <span>Room code</span>
           <input
             value={roomCode}
             // Room codes are always uppercase (see game.ts's
@@ -65,16 +63,17 @@ export function HomeScreen({
             placeholder="ABCD"
             maxLength={4}
           />
-        </label>{" "}
+        </label>
         <button
+          className="btn"
           disabled={!trimmedName || !roomCode.trim() || pending}
           onClick={() => onJoinRoom(roomCode.trim(), trimmedName)}
         >
           Join room
         </button>
-      </p>
+      </div>
 
-      {error && <p>{error}</p>}
+      {error && <p className="alert">{error}</p>}
     </div>
   );
 }

@@ -63,6 +63,18 @@ function requirePlayer(state: GameState, playerId: string): PlayerState {
   return player;
 }
 
+// Rooms are never cleaned up (see the module comment above) — an
+// unbounded log on a long-lived room would otherwise grow forever, so
+// this caps it at the most recent MAX_LOG_ENTRIES lines.
+const MAX_LOG_ENTRIES = 50;
+
+function pushLog(state: GameState, message: string): void {
+  state.log.push(message);
+  if (state.log.length > MAX_LOG_ENTRIES) {
+    state.log.splice(0, state.log.length - MAX_LOG_ENTRIES);
+  }
+}
+
 export function createRoom(hostName: string): {
   roomCode: string;
   playerId: string;
@@ -84,7 +96,9 @@ export function createRoom(hostName: string): {
     usedSongIds: [],
     settings: { winTarget: WIN_TARGET, libraryVersion: "1" },
     playback: null,
+    log: [],
   };
+  pushLog(state, `${hostName} created the room.`);
   rooms.set(roomCode, state);
 
   if (DEBUG) {
@@ -107,6 +121,7 @@ export function joinRoom(
 
   const player = newPlayer(name);
   state.players[player.id] = player;
+  pushLog(state, `${player.name} joined the room.`);
 
   if (DEBUG) {
     console.log(`game debug: "${name}" joined room ${roomCode}`);
@@ -209,10 +224,20 @@ async function finishRound(
     // timeline changes, matching the physical game's rule.
   }
 
+  pushLog(state, `The song was "${song.title}" by ${song.artist} (${song.year}).`);
+  if (activePlacementCorrect) {
+    pushLog(state, `${activePlayer.name} placed it correctly!`);
+  } else if (stolenBy) {
+    pushLog(state, `${requirePlayer(state, stolenBy).name} stole the card!`);
+  } else {
+    pushLog(state, `Nobody guessed it — the card is lost.`);
+  }
+
   const winnerId = stolenBy ?? activeId;
   if (requirePlayer(state, winnerId).timeline.length >= state.settings.winTarget) {
     state.phase = { type: "gameOver", winnerId };
     state.playback = null;
+    pushLog(state, `${requirePlayer(state, winnerId).name} wins the game!`);
   } else {
     state.phase = {
       type: "reveal",
@@ -279,6 +304,7 @@ function loadNextSong(state: GameState, catalog: SongManifestEntry[]): void {
     );
     state.phase = { type: "gameOver", winnerId: winner.id };
     state.playback = null;
+    pushLog(state, `${winner.name} wins the game!`);
     return;
   }
 
@@ -292,6 +318,9 @@ function loadNextSong(state: GameState, catalog: SongManifestEntry[]): void {
     positionSec: 0,
     updatedAt: Date.now(),
   };
+  // Never the song itself — that stays hidden until its own reveal phase.
+  const nextActive = requirePlayer(state, currentPlayerId(state)!);
+  pushLog(state, `It's ${nextActive.name}'s turn.`);
 }
 
 export async function applyAction(
@@ -321,6 +350,7 @@ export async function applyAction(
       const catalog = (await loadManifest()).songs;
       state.turnOrder = shuffledPlayerIds(state.players);
       state.currentTurnIndex = 0;
+      pushLog(state, "The game has started!");
 
       // Deal every player a starting card (auto-placed — it just seeds
       // their timeline) and their starting tokens, before the first real
@@ -352,6 +382,10 @@ export async function applyAction(
         activePlacementPosition: action.position,
         votes: [],
       };
+      pushLog(
+        state,
+        `${requirePlayer(state, playerId).name} placed a card at slot ${action.position} in their timeline.`,
+      );
       break;
     }
 
@@ -384,6 +418,7 @@ export async function applyAction(
       // that a wrong guess still costs you the token.
       player.tokens -= 1;
       phase.votes.push({ playerId, position: action.position });
+      pushLog(state, `${player.name} attempted to steal at slot ${action.position}.`);
       maybeCompleteVoting(state, phase);
       break;
     }
@@ -401,6 +436,7 @@ export async function applyAction(
         throw new Error("already voted this round");
       }
       phase.votes.push({ playerId, position: null });
+      pushLog(state, `${requirePlayer(state, playerId).name} passed.`);
       maybeCompleteVoting(state, phase);
       break;
     }
@@ -428,6 +464,10 @@ export async function applyAction(
       }
       phase.guessTokenClaimed = true;
       requirePlayer(state, activeId).tokens += 1;
+      pushLog(
+        state,
+        `${requirePlayer(state, activeId).name} guessed the title and artist for a bonus token!`,
+      );
       break;
     }
 

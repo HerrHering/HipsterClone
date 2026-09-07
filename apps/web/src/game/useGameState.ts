@@ -9,7 +9,7 @@ import { fetchState } from "./api";
 // Exported so GameBoard.tsx can size its own "wait for everyone to catch
 // up" delay (after a seek) off the same number, instead of a second,
 // easily-drifting magic constant.
-export const POLL_INTERVAL_MS = 1500;
+export const POLL_INTERVAL_MS = 1000;
 
 /**
  * Polls a room's state on an interval while `roomCode` is set, and stops

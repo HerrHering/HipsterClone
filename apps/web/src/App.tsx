@@ -170,68 +170,80 @@ function App() {
     <main>
       <h1>HipsterClone</h1>
 
-      {manifestState.status === "loading" && <p>Loading songs…</p>}
+      <div className="app-shell">
+        {manifestState.status === "loading" && <p>Loading songs…</p>}
 
-      {manifestState.status === "error" && (
-        <p>
-          Couldn't load manifest.json ({manifestState.message}). Run{" "}
-          <code>npm run scrape</code> first.
-        </p>
-      )}
+        {manifestState.status === "error" && (
+          <p className="alert">
+            Couldn't load manifest.json ({manifestState.message}). Run{" "}
+            <code>npm run scrape</code> first.
+          </p>
+        )}
 
-      {manifestState.status === "ready" && (
-        <>
-          {!seat && (
-            <HomeScreen
-              initialName={storedName}
-              onCreateRoom={handleCreateRoom}
-              onJoinRoom={handleJoinRoom}
-              pending={homePending}
-              error={homeError}
-            />
-          )}
+        {manifestState.status === "ready" && (
+          <>
+            {!seat && (
+              <HomeScreen
+                initialName={storedName}
+                onCreateRoom={handleCreateRoom}
+                onJoinRoom={handleJoinRoom}
+                pending={homePending}
+                error={homeError}
+              />
+            )}
 
-          {seat && !gameState && (
-            <div>
-              {pollError ? (
-                <p>Couldn't reach room {seat.roomCode}: {pollError}</p>
-              ) : (
-                <p>Loading room {seat.roomCode}…</p>
-              )}
-              <button onClick={leaveRoom}>Back to home</button>
-            </div>
-          )}
+            {seat && !gameState && (
+              <div className="card stack-sm">
+                {pollError ? (
+                  <p className="alert">
+                    Couldn't reach room {seat.roomCode}: {pollError}
+                  </p>
+                ) : (
+                  <p>Loading room {seat.roomCode}…</p>
+                )}
+                <button className="btn btn-danger-outline" onClick={leaveRoom}>
+                  Back to home
+                </button>
+              </div>
+            )}
 
-          {seat && gameState && (
-            <>
-              {/* A poll hiccup after we already have a good state is just
-                  noted, not treated as fatal — keep showing the last known
-                  state rather than yanking the player back to a loading
-                  screen over what might be one missed request. */}
-              {pollError && <p>(connection hiccup — showing last known state)</p>}
+            {seat && gameState && (
+              <div className="stack">
+                {/* A poll hiccup after we already have a good state is just
+                    noted, not treated as fatal — keep showing the last known
+                    state rather than yanking the player back to a loading
+                    screen over what might be one missed request. */}
+                {pollError && (
+                  <span className="badge badge-muted">
+                    (connection hiccup — showing last known state)
+                  </span>
+                )}
 
-              {gameState.phase.type === "lobby" ? (
-                <LobbyScreen
-                  roomCode={seat.roomCode}
-                  playerId={seat.playerId}
-                  state={gameState}
-                  onStartGame={() => handleAction({ type: "START_GAME" })}
-                />
-              ) : (
-                <GameBoard
-                  roomCode={seat.roomCode}
-                  playerId={seat.playerId}
-                  state={gameState}
-                  songsById={manifestState.songsById}
-                  onAction={handleAction}
-                />
-              )}
+                {gameState.phase.type === "lobby" ? (
+                  <LobbyScreen
+                    roomCode={seat.roomCode}
+                    playerId={seat.playerId}
+                    state={gameState}
+                    onStartGame={() => handleAction({ type: "START_GAME" })}
+                  />
+                ) : (
+                  <GameBoard
+                    roomCode={seat.roomCode}
+                    playerId={seat.playerId}
+                    state={gameState}
+                    songsById={manifestState.songsById}
+                    onAction={handleAction}
+                  />
+                )}
 
-              <button onClick={leaveRoom}>Leave room</button>
-            </>
-          )}
-        </>
-      )}
+                <button className="btn btn-danger-outline" onClick={leaveRoom}>
+                  Leave room
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </main>
   );
 }

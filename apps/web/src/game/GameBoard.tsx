@@ -12,6 +12,7 @@ import {
   errorMessage,
 } from "@hipster-clone/shared";
 import { safeLocalStorageGet, safeLocalStorageSet } from "../localStorage";
+import { EventLog } from "./EventLog";
 import { POLL_INTERVAL_MS } from "./useGameState";
 
 type SongLookup = Record<string, SongManifestEntry>;
@@ -55,12 +56,15 @@ function describeSlot(
   if (!before) {
     // `after` must exist here: the only way both `before` and `after` can
     // be missing is the empty-timeline case just handled above.
-    return `before ${describeSong(songsById, after!.songId)}`;
+    return `[before] ${describeSong(songsById, after!.songId)}`;
   }
   if (!after) {
-    return `after ${describeSong(songsById, before.songId)}`;
+    return `[after] ${describeSong(songsById, before.songId)}`;
   }
-  return `between ${describeSong(songsById, before.songId)} and ${describeSong(songsById, after.songId)}`;
+  // Bracketed connector words ([before]/[after]/[between]/[and]) throughout
+  // this function — without them, "between" or "and" could be misread as
+  // part of a song's own title/artist text sitting right next to it.
+  return `[between] ${describeSong(songsById, before.songId)} [and] ${describeSong(songsById, after.songId)}`;
 }
 
 // One sentence describing what happened at reveal. Pulled out of the JSX
@@ -209,7 +213,7 @@ function PlacementPanel({
 }) {
   const [position, setPosition] = useState<number | null>(null);
   return (
-    <div>
+    <div className="card stack-sm">
       <h3>Where does this go in your timeline?</h3>
       <SlotPicker
         timeline={timeline}
@@ -218,6 +222,7 @@ function PlacementPanel({
         onSelect={setPosition}
       />
       <button
+        className="btn btn-primary"
         disabled={position === null}
         onClick={() => position !== null && onConfirm(position)}
       >
@@ -258,7 +263,7 @@ function StealPanel({
   // just avoids sending a request already known to fail).
   const positionStillOpen = position !== null && !claimedSlots.has(position);
   return (
-    <div>
+    <div className="card stack-sm">
       <h3>Where does this go in {activePlayerName}'s timeline?</h3>
       {tokens < 1 ? (
         <p>No tokens left to attempt a steal — you can still pass.</p>
@@ -271,13 +276,18 @@ function StealPanel({
           claimedSlots={claimedSlots}
         />
       )}
-      <button
-        disabled={tokens < 1 || !positionStillOpen}
-        onClick={() => positionStillOpen && position !== null && onAttempt(position)}
-      >
-        Attempt steal (1 token, win or lose)
-      </button>
-      <button onClick={onPass}>Pass</button>
+      <div className="btn-row">
+        <button
+          className="btn btn-warning"
+          disabled={tokens < 1 || !positionStillOpen}
+          onClick={() => positionStillOpen && position !== null && onAttempt(position)}
+        >
+          Attempt steal (1 token, win or lose)
+        </button>
+        <button className="btn btn-outline" onClick={onPass}>
+          Pass
+        </button>
+      </div>
     </div>
   );
 }
@@ -322,10 +332,10 @@ function RevealPanel({
       return null;
     }
     return (
-      <div>
+      <div className="card stack-sm">
         <h3>All votes are in!</h3>
-        <label>
-          Guess the title + artist (optional){" "}
+        <label className="field">
+          <span>Guess the title + artist (optional)</span>
           <input
             value={guessDraft}
             onChange={(event) => setGuessDraft(event.target.value)}
@@ -333,6 +343,7 @@ function RevealPanel({
           />
         </label>
         <button
+          className="btn btn-primary"
           onClick={() => {
             // Locked in *before* the reveal request goes out — this is
             // the player's blind guess, not one made with the answer
@@ -348,7 +359,7 @@ function RevealPanel({
   }
 
   return (
-    <>
+    <div className="card stack-sm">
       <p>
         The song was {describeSong(songsById, phase.songId)} — it belongs at
         slot {phase.correctPosition} in {activeName}'s timeline.{" "}
@@ -362,27 +373,32 @@ function RevealPanel({
           yes/no verdict (CLAIM_GUESS_TOKEN), guarded by guessTokenClaimed
           so it can only happen once per round. */}
       {isActive && lockedGuess && !phase.guessTokenClaimed && (
-        <div>
+        <div className="stack-sm">
           <p>
             The song was {describeSong(songsById, phase.songId)}, you
             guessed "{lockedGuess}". Are they the same?
           </p>
-          <button
-            onClick={() => {
-              onClaimToken();
-              setLockedGuess(null);
-            }}
-          >
-            Yes, they are the same, I deserve a token!
-          </button>
-          <button onClick={() => setLockedGuess(null)}>
-            No, the songs are not the same, I don't deserve a token!
-          </button>
+          <div className="btn-row">
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                onClaimToken();
+                setLockedGuess(null);
+              }}
+            >
+              Yes, they are the same, I deserve a token!
+            </button>
+            <button className="btn btn-outline" onClick={() => setLockedGuess(null)}>
+              No, the songs are not the same, I don't deserve a token!
+            </button>
+          </div>
         </div>
       )}
 
       {phase.guessTokenClaimed && (
-        <p>{activeName} earned a bonus token for that guess!</p>
+        <p className="badge badge-accent">
+          {activeName} earned a bonus token for that guess!
+        </p>
       )}
 
       {/* Gated on `lockedGuess === null` rather than on the phase alone —
@@ -394,41 +410,69 @@ function RevealPanel({
           their one chance to claim the bonus token — the phase moves on
           to the next round the moment NEXT_TURN fires. */}
       {isActive && lockedGuess === null && (
-        <button onClick={onNextTurn}>Next turn</button>
+        <button className="btn btn-primary" onClick={onNextTurn}>
+          Next turn
+        </button>
       )}
-    </>
+    </div>
   );
 }
 
 // The "open cards" summary this game is meant to have: every player's name,
 // card/token counts, and full timeline, always visible to everyone.
+//
+// `voteStatusByPlayerId` (only meaningful during stealWindow/pendingReveal
+// — see GameBoard's own `votes` derivation) folds what used to be a
+// separate "Waiting on votes" list into each player's own card instead, as
+// a small badge — same information, one less panel on the page.
 function PlayerSummary({
   state,
   songsById,
   highlightId,
+  voteStatusByPlayerId,
 }: {
   state: GameState;
   songsById: SongLookup;
   highlightId?: string | null;
+  voteStatusByPlayerId?: Record<string, string>;
 }) {
   return (
-    <div>
+    <div className="card">
       <h3>Players</h3>
-      <ul>
-        {Object.values(state.players).map((player) => (
-          <li key={player.id}>
-            <strong>{player.name}</strong>
-            {player.id === highlightId && " (on turn)"} —{" "}
-            {player.timeline.length} card{player.timeline.length === 1 ? "" : "s"},{" "}
-            {player.tokens} token{player.tokens === 1 ? "" : "s"}
-            <ul>
-              {player.timeline.map((card) => (
-                <li key={card.songId}>{describeSong(songsById, card.songId)}</li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
+      <div className="player-grid">
+        {Object.values(state.players).map((player) => {
+          const voteStatus = voteStatusByPlayerId?.[player.id];
+          return (
+            <div
+              key={player.id}
+              className={
+                player.id === highlightId ? "player-card is-active" : "player-card"
+              }
+            >
+              <div className="player-card-name">
+                <strong>{player.name}</strong>
+                {player.id === highlightId && (
+                  <span className="badge badge-accent">On turn</span>
+                )}
+                {voteStatus && <span className="badge badge-muted">{voteStatus}</span>}
+              </div>
+              <div className="player-card-counts">
+                <span className="badge">
+                  {player.timeline.length} card{player.timeline.length === 1 ? "" : "s"}
+                </span>
+                <span className="badge badge-token">
+                  {player.tokens} token{player.tokens === 1 ? "" : "s"}
+                </span>
+              </div>
+              <ul>
+                {player.timeline.map((card) => (
+                  <li key={card.songId}>{describeSong(songsById, card.songId)}</li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -588,10 +632,11 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
     // winnerId always comes from either activeId or stolenBy, both always
     // real players (see game.ts's finishRound/loadNextSong).
     return (
-      <div>
+      <div className="stack">
         <h2>Game over!</h2>
-        <p>{state.players[state.phase.winnerId]!.name} wins!</p>
+        <p className="status-banner">{state.players[state.phase.winnerId]!.name} wins!</p>
         <PlayerSummary state={state} songsById={songsById} />
+        <EventLog entries={state.log} />
       </div>
     );
   }
@@ -646,35 +691,58 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
       }
     }
   }
+  // Folded into each player's own scoreboard card (see PlayerSummary)
+  // instead of a separate "Waiting on votes" panel — same data as before,
+  // just relocated. Only meaningful during stealWindow/pendingReveal;
+  // `undefined` the rest of the time so PlayerSummary shows no badge.
+  const voteStatusByPlayerId: Record<string, string> | undefined = votes
+    ? Object.fromEntries(
+        Object.values(state.players)
+          .filter((player) => player.id !== activeId)
+          .map((player) => {
+            const vote = votes.find((v) => v.playerId === player.id);
+            const status =
+              vote === undefined
+                ? "Still deciding"
+                : vote.position === null
+                  ? "Passed"
+                  : `Stole @${vote.position}`;
+            return [player.id, status];
+          }),
+      )
+    : undefined;
   return (
-    <div>
+    <div className="stack">
       <h2>Room {roomCode}</h2>
-      <p>You are <strong>{me?.name ?? playerId}</strong>.</p>
       <p>
-        <strong>{myStatusLine(state, playerId)}</strong>
+        You are <strong>{me?.name ?? playerId}</strong>.
       </p>
+      <p className="status-banner">{myStatusLine(state, playerId)}</p>
 
-      {(state.phase.type === "pendingReveal" || state.phase.type === "reveal") && (
-        // key={songId}: a fresh RevealPanel (and thus a fresh, empty guess)
-        // each round — see the component's own comment. Not remounted by
-        // the pendingReveal → reveal transition itself, since songId stays
-        // the same across those two phases within one round.
-        <RevealPanel
-          key={state.phase.songId}
-          phase={state.phase}
-          songsById={songsById}
-          players={state.players}
-          activeName={activeName}
-          isActive={isActive}
-          onReveal={() => act({ type: "REVEAL" })}
-          onClaimToken={() => act({ type: "CLAIM_GUESS_TOKEN" })}
-          onNextTurn={() => act({ type: "NEXT_TURN" })}
-        />
-      )}
+      <div className="game-layout">
+        <div className="main-column">
+          {(state.phase.type === "pendingReveal" || state.phase.type === "reveal") && (
+            // key={songId}: a fresh RevealPanel (and thus a fresh, empty
+            // guess) each round — see the component's own comment. Not
+            // remounted by the pendingReveal → reveal transition itself,
+            // since songId stays the same across those two phases within
+            // one round.
+            <RevealPanel
+              key={state.phase.songId}
+              phase={state.phase}
+              songsById={songsById}
+              players={state.players}
+              activeName={activeName}
+              isActive={isActive}
+              onReveal={() => act({ type: "REVEAL" })}
+              onClaimToken={() => act({ type: "CLAIM_GUESS_TOKEN" })}
+              onNextTurn={() => act({ type: "NEXT_TURN" })}
+            />
+          )}
 
-      {state.playback && (
-        <div>
-          {isActive ? (
+          {state.playback && (
+            <div className="card">
+              {isActive ? (
             // The active player gets one real, native, directly
             // interactive element — no separate invisible twin, no
             // separate "Mute for me" button. Nothing but their own
@@ -722,8 +790,28 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
                     });
                   }
                 }}
+                // Same loading/buffering feedback the non-active follower
+                // element below already has — the active player can
+                // trigger the same server-side yt-dlp download as anyone
+                // else (see cache.ts's ensureCached) and deserves the same
+                // "something's happening" indicator, not just silence.
+                onLoadStart={() => setAudioStatus("loading")}
+                onWaiting={() => setAudioStatus("buffering")}
+                // The one that was missing: onWaiting above moves this into
+                // "buffering," but nothing ever moved it back out once real
+                // playback actually resumed, so it stuck on "Buffering…"
+                // forever even after the song was audibly playing.
+                onPlaying={() => setAudioStatus("playing")}
+                onCanPlay={() =>
+                  setAudioStatus((current) =>
+                    current === "loading" ? "paused" : current,
+                  )
+                }
                 onPlay={() => mirror({ type: "PLAY" })}
-                onPause={() => mirror({ type: "PAUSE" })}
+                onPause={() => {
+                  mirror({ type: "PAUSE" });
+                  setAudioStatus("paused");
+                }}
                 onSeeked={async (event) => {
                   // The one-time catch-up above also fires a native
                   // 'seeked' event (setting .currentTime always does,
@@ -761,8 +849,16 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
               <br />
               {locked ? (
                 <span>Paused — waiting for everyone to catch up…</span>
+              ) : syncing ? (
+                <span>Syncing with server…</span>
               ) : (
-                syncing && <span>Syncing with server…</span>
+                // Only the loading/buffering states get a label here — the
+                // native controls above already show play/pause visually,
+                // so a "Playing"/"Paused" label would just be redundant for
+                // the one player who can see and touch them directly.
+                (audioStatus === "loading" || audioStatus === "buffering") && (
+                  <span>{audioStatus === "loading" ? "Loading song…" : "Buffering…"}</span>
+                )
               )}
             </>
           ) : (
@@ -823,104 +919,86 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
                 {audioStatus === "playing" && "Playing"}
                 {audioStatus === "paused" && "Paused"}
               </span>
-              <button onClick={() => setMuted((prev) => !prev)}>
+              <button className="btn btn-outline" onClick={() => setMuted((prev) => !prev)}>
                 {muted ? "Unmute for me" : "Mute for me"}
               </button>
             </>
           )}
-        </div>
-      )}
+            </div>
+          )}
 
-      {state.phase.type === "playingSong" && isActive && me && (
-        // key={songId}: a fresh PlacementPanel (and thus a fresh, empty
-        // selection) each round — see the component's own comment.
-        <PlacementPanel
-          key={state.phase.songId}
-          timeline={me.timeline}
-          songsById={songsById}
-          onConfirm={(position) => act({ type: "CONFIRM_PLACEMENT", position })}
-        />
-      )}
-
-      {/* The active player's own timeline (not `me.timeline`) is what every
-          voter's guess is judged against — see StealPanel's comment.
-          Rendered only until *this* player has voted; once `myVote` exists,
-          there is nothing left for them to click (the vote list below
-          already shows their status instead). */}
-      {state.phase.type === "stealWindow" &&
-        !isActive &&
-        me &&
-        activePlayer &&
-        myVote === undefined && (
-          <StealPanel
-            key={state.phase.songId}
-            timeline={activePlayer.timeline}
-            songsById={songsById}
-            activePlayerName={activeName}
-            tokens={me.tokens}
-            claimedSlots={claimedSlots}
-            onAttempt={(position) => act({ type: "STEAL_ATTEMPT", position })}
-            onPass={() => act({ type: "PASS" })}
-          />
-        )}
-
-      {/* While voting's still open, the active player has no vote of their
-          own but shouldn't lose sight of the board while everyone else
-          decides — that's the "stealWindow && isActive" half. Once voting
-          closes ("pendingReveal"), every slot is now final, so the board
-          becomes read-only for *everyone*, not just the active player —
-          there's no more voting left to spoil by looking. Same SlotPicker,
-          same live claimedSlots, just with no `onSelect` at all: every
-          button renders disabled, so this is purely something to watch,
-          not touch. */}
-      {((state.phase.type === "stealWindow" && isActive) ||
-        state.phase.type === "pendingReveal") &&
-        activePlayer && (
-          <div>
-            <h3>
-              {state.phase.type === "pendingReveal"
-                ? "Final placements"
-                : "Watching the steal window"}
-            </h3>
-            <SlotPicker
-              timeline={activePlayer.timeline}
+          {state.phase.type === "playingSong" && isActive && me && (
+            // key={songId}: a fresh PlacementPanel (and thus a fresh, empty
+            // selection) each round — see the component's own comment.
+            <PlacementPanel
+              key={state.phase.songId}
+              timeline={me.timeline}
               songsById={songsById}
-              claimedSlots={claimedSlots}
+              onConfirm={(position) => act({ type: "CONFIRM_PLACEMENT", position })}
             />
-          </div>
-        )}
+          )}
 
-      {/* A fully-open readout of where voting stands, covering both
-          "stealWindow" (still voting) and "pendingReveal" (voting done,
-          waiting on the active player's Reveal) — there's no reason to
-          hide it in an open-card game. */}
-      {votes && (
-        <div>
-          <h3>Waiting on votes</h3>
-          <ul>
-            {Object.values(state.players)
-              .filter((player) => player.id !== activeId)
-              .map((player) => {
-                const vote = votes.find((v) => v.playerId === player.id);
-                const status =
-                  vote === undefined
-                    ? "still deciding"
-                    : vote.position === null
-                      ? "passed"
-                      : `attempted a steal at slot ${vote.position}`;
-                return (
-                  <li key={player.id}>
-                    {player.name}
-                    {player.id === playerId && " (you)"}: {status}
-                  </li>
-                );
-              })}
-          </ul>
+          {/* The active player's own timeline (not `me.timeline`) is what
+              every voter's guess is judged against — see StealPanel's
+              comment. Rendered only until *this* player has voted; once
+              `myVote` exists, there is nothing left for them to click
+              (their scoreboard badge already shows their status instead). */}
+          {state.phase.type === "stealWindow" &&
+            !isActive &&
+            me &&
+            activePlayer &&
+            myVote === undefined && (
+              <StealPanel
+                key={state.phase.songId}
+                timeline={activePlayer.timeline}
+                songsById={songsById}
+                activePlayerName={activeName}
+                tokens={me.tokens}
+                claimedSlots={claimedSlots}
+                onAttempt={(position) => act({ type: "STEAL_ATTEMPT", position })}
+                onPass={() => act({ type: "PASS" })}
+              />
+            )}
+
+          {/* While voting's still open, the active player has no vote of
+              their own but shouldn't lose sight of the board while everyone
+              else decides — that's the "stealWindow && isActive" half. Once
+              voting closes ("pendingReveal"), every slot is now final, so
+              the board becomes read-only for *everyone*, not just the
+              active player — there's no more voting left to spoil by
+              looking. Same SlotPicker, same live claimedSlots, just with no
+              `onSelect` at all: every button renders disabled, so this is
+              purely something to watch, not touch. */}
+          {((state.phase.type === "stealWindow" && isActive) ||
+            state.phase.type === "pendingReveal") &&
+            activePlayer && (
+              <div className="card">
+                <h3>
+                  {state.phase.type === "pendingReveal"
+                    ? "Final placements"
+                    : "Watching the steal window"}
+                </h3>
+                <SlotPicker
+                  timeline={activePlayer.timeline}
+                  songsById={songsById}
+                  claimedSlots={claimedSlots}
+                />
+              </div>
+            )}
+
+          {actionError && <p className="alert">{actionError}</p>}
         </div>
-      )}
-      {actionError && <p>{actionError}</p>}
 
-      <PlayerSummary state={state} songsById={songsById} highlightId={activeId} />
+        <div className="side-column">
+          <PlayerSummary
+            state={state}
+            songsById={songsById}
+            highlightId={activeId}
+            voteStatusByPlayerId={voteStatusByPlayerId}
+          />
+          <EventLog entries={state.log} />
+        </div>
+      </div>
     </div>
   );
 }
