@@ -8,6 +8,10 @@ apps/web/public/audio/
 apps/web/public/manifest.json
 apps/api/data/cache/
 
+# exported YouTube auth cookies for headless/Docker deployments — a
+# credential, never committed (see the Stage 5 deploy runbook)
+cookies.txt
+
 # editor/OS
 .vscode/*
 !.vscode/extensions.json

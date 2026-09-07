@@ -38,6 +38,13 @@ const VIDEO_ID_PATTERN = /^[\w-]{11}$/;
  * Which browser is available varies per machine/friend, so it's configurable
  * via the YTDLP_COOKIES_BROWSER env var (defaults to "firefox"; set to "none"
  * to skip cookies entirely, e.g. on a machine where downloads work without them).
+ *
+ * A headless server/container has no real logged-in browser profile to read
+ * from at all — for that case, YTDLP_COOKIES_FILE points at a `cookies.txt`
+ * exported ahead of time (e.g. `yt-dlp --cookies-from-browser firefox
+ * --cookies cookies.txt --skip-download <url>` run once on a machine that
+ * already has a working browser), and takes priority over
+ * YTDLP_COOKIES_BROWSER when set.
  */
 export async function downloadClip(
   songId: string,
@@ -57,9 +64,11 @@ export async function downloadClip(
   // (apps/api/data/cache); create it if this is the very first download.
   await mkdir(cacheDir, { recursive: true });
 
+  const cookiesFile = process.env.YTDLP_COOKIES_FILE;
   const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER ?? "firefox";
-  const cookieArgs =
-    cookiesBrowser && cookiesBrowser !== "none"
+  const cookieArgs = cookiesFile
+    ? ["--cookies", cookiesFile]
+    : cookiesBrowser && cookiesBrowser !== "none"
       ? ["--cookies-from-browser", cookiesBrowser]
       : [];
 

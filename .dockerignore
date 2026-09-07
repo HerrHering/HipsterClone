@@ -1,0 +1,21 @@
+# Rebuilt fresh inside the image for the right platform/architecture —
+# never copy the host's own node_modules in.
+**/node_modules
+
+# Rebuilt fresh by `npm run build` inside the image.
+**/dist
+
+.git
+.venv
+
+# Regenerable, and mounted separately as a volume in docker-compose.yml
+# anyway — baking it into the image would only bloat it and go stale.
+apps/api/data/cache
+
+# A credential, mounted separately as a read-only volume instead of
+# ever being baked into the image.
+cookies.txt
+
+# NOTE: apps/web/public/manifest.json is deliberately NOT excluded here
+# — it's gitignored (regenerate via `npm run scrape`) but the image
+# build needs it to already exist on disk before building.

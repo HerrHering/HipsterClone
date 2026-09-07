@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    ports:
+      - "5174:5174"
+    environment:
+      NODE_ENV: production
+      PORT: "5174"
+      # See downloadClip.ts — a headless server has no real logged-in
+      # browser profile to pull YouTube cookies from, so this points at
+      # a cookies.txt exported ahead of time (see the deploy runbook).
+      YTDLP_COOKIES_FILE: /app/cookies.txt
+    volumes:
+      - ./cookies.txt:/app/cookies.txt:ro
+      # Persists downloaded songs across restarts/rebuilds — without
+      # this, every `docker compose up --build` would re-download
+      # everything from scratch.
+      - ./apps/api/data/cache:/app/apps/api/data/cache
+    restart: unless-stopped
