@@ -24,6 +24,7 @@ interface Props {
   state: GameState;
   songsById: SongLookup;
   onAction: (action: GameAction) => Promise<void>;
+  onLeave: () => void;
 }
 
 // SERVER API REQUEST — same as App.tsx's own audioSrc: apps/api downloads
@@ -124,27 +125,33 @@ function PlacementPanel({
   timeline,
   songsById,
   onConfirm,
+  pending,
 }: {
   timeline: TimelineCard[];
   songsById: SongLookup;
   onConfirm: (position: number) => void;
+  pending: boolean;
 }) {
   const [position, setPosition] = useState<number | null>(null);
   return (
     <div className="card stack-sm">
       <h3>Where does this go in your timeline?</h3>
+      <p id="placement-help" className="timeline-instruction">Choose a gap before, between, or after the cards.</p>
       <SongTimeline
         timeline={timeline}
         songsById={songsById}
         selected={position}
         onSelect={setPosition}
+        ariaLabel="Choose a placement in your timeline"
+        describedBy="placement-help"
       />
       <button
         className="btn btn-primary"
-        disabled={position === null}
+        disabled={position === null || pending}
+        aria-busy={pending}
         onClick={() => position !== null && onConfirm(position)}
       >
-        Confirm placement
+        {pending ? "Confirming…" : "Confirm placement"}
       </button>
     </div>
   );
@@ -163,6 +170,7 @@ function StealPanel({
   claimedSlots,
   onAttempt,
   onPass,
+  pendingAction,
 }: {
   timeline: TimelineCard[];
   songsById: SongLookup;
@@ -171,6 +179,7 @@ function StealPanel({
   claimedSlots: Map<number, string>;
   onAttempt: (position: number) => void;
   onPass: () => void;
+  pendingAction: "STEAL_ATTEMPT" | "PASS" | null;
 }) {
   const [position, setPosition] = useState<number | null>(null);
   // A slot picked before this poll tick can become claimed by someone else
@@ -186,24 +195,30 @@ function StealPanel({
       {tokens < 1 ? (
         <p>No tokens left to attempt a steal — you can still pass.</p>
       ) : (
-        <SongTimeline
-          timeline={timeline}
-          songsById={songsById}
-          selected={position}
-          onSelect={setPosition}
-          claimedSlots={claimedSlots}
-        />
+        <>
+          <p id="steal-help" className="timeline-instruction">Choose a gap before, between, or after the cards.</p>
+          <SongTimeline
+            timeline={timeline}
+            songsById={songsById}
+            selected={position}
+            onSelect={setPosition}
+            claimedSlots={claimedSlots}
+            ariaLabel={`Choose a steal position in ${activePlayerName}'s timeline`}
+            describedBy="steal-help"
+          />
+        </>
       )}
       <div className="btn-row">
         <button
           className="btn btn-warning"
-          disabled={tokens < 1 || !positionStillOpen}
+          disabled={tokens < 1 || !positionStillOpen || pendingAction !== null}
+          aria-busy={pendingAction === "STEAL_ATTEMPT"}
           onClick={() => positionStillOpen && position !== null && onAttempt(position)}
         >
-          Attempt steal (1 token, win or lose)
+          {pendingAction === "STEAL_ATTEMPT" ? "Submitting steal…" : "Attempt steal (1 token, win or lose)"}
         </button>
-        <button className="btn btn-outline" onClick={onPass}>
-          Pass
+        <button className="btn btn-outline" onClick={onPass} disabled={pendingAction !== null} aria-busy={pendingAction === "PASS"}>
+          {pendingAction === "PASS" ? "Passing…" : "Pass"}
         </button>
       </div>
     </div>
@@ -230,6 +245,7 @@ function RevealPanel({
   onReveal,
   onClaimToken,
   onNextTurn,
+  pendingAction,
 }: {
   phase: Extract<GamePhase, { type: "pendingReveal" | "reveal" }>;
   songsById: SongLookup;
@@ -237,9 +253,10 @@ function RevealPanel({
   activeId: string;
   activeName: string;
   isActive: boolean;
-  onReveal: () => void;
-  onClaimToken: () => void;
-  onNextTurn: () => void;
+  onReveal: () => Promise<void>;
+  onClaimToken: () => Promise<void>;
+  onNextTurn: () => Promise<void>;
+  pendingAction: GameAction["type"] | null;
 }) {
   const [guessDraft, setGuessDraft] = useState("");
   const [lockedGuess, setLockedGuess] = useState<string | null>(null);
@@ -257,13 +274,19 @@ function RevealPanel({
         <label className="field">
           <span>Guess the title + artist (optional)</span>
           <input
+            name="songGuess"
             value={guessDraft}
             onChange={(event) => setGuessDraft(event.target.value)}
             placeholder="Song title — artist"
+            autoComplete="off"
+            aria-describedby="guess-help"
           />
+          <small id="guess-help" className="field-help">Keep it private until the song is revealed.</small>
         </label>
         <button
           className="btn btn-primary"
+          disabled={pendingAction !== null}
+          aria-busy={pendingAction === "REVEAL"}
           onClick={() => {
             // Locked in *before* the reveal request goes out — this is
             // the player's blind guess, not one made with the answer
@@ -275,7 +298,7 @@ function RevealPanel({
             onReveal();
           }}
         >
-          Reveal
+          {pendingAction === "REVEAL" ? "Revealing…" : "Reveal"}
         </button>
       </div>
     );
@@ -321,7 +344,7 @@ function RevealPanel({
           size="lg"
           tone={phase.activePlacementCorrect ? "correct" : "incorrect"}
         />
-        <p className={`blob blob-${outcomeTone}`}>
+        <p className={`blob blob-${outcomeTone}`} role="status" aria-live="polite" aria-atomic="true">
           It belongs at {slotText} in {activeName}'s timeline.{" "}
           {describeOutcome(phase, players, activeName)}
         </p>
@@ -332,6 +355,7 @@ function RevealPanel({
         songsById={songsById}
         claimedSlots={revealClaimedSlots}
         positionTones={positionTones}
+        ariaLabel="Revealed placement results"
       />
 
       {/* The guess itself was never sent to the server — it only ever
@@ -358,14 +382,16 @@ function RevealPanel({
           <div className="btn-row">
             <button
               className="btn btn-success"
-              onClick={() => {
-                onClaimToken();
+              disabled={pendingAction !== null}
+              aria-busy={pendingAction === "CLAIM_GUESS_TOKEN"}
+              onClick={async () => {
+                await onClaimToken();
                 setLockedGuess(null);
               }}
             >
-              Yes, they are the same, I deserve a token!
+              {pendingAction === "CLAIM_GUESS_TOKEN" ? "Claiming token…" : "Yes, they are the same, I deserve a token!"}
             </button>
-            <button className="btn btn-outline" onClick={() => setLockedGuess(null)}>
+            <button className="btn btn-outline" disabled={pendingAction !== null} onClick={() => setLockedGuess(null)}>
               No, the songs are not the same, I don't deserve a token!
             </button>
           </div>
@@ -387,8 +413,8 @@ function RevealPanel({
           their one chance to claim the bonus token — the phase moves on
           to the next round the moment NEXT_TURN fires. */}
       {isActive && lockedGuess === null && (
-        <button className="btn btn-primary" onClick={onNextTurn}>
-          Next turn
+        <button className="btn btn-primary" disabled={pendingAction !== null} aria-busy={pendingAction === "NEXT_TURN"} onClick={onNextTurn}>
+          {pendingAction === "NEXT_TURN" ? "Starting next turn…" : "Next turn"}
         </button>
       )}
     </div>
@@ -474,7 +500,7 @@ function PlayerSummary({
   );
 }
 
-export function GameBoard({ playerId, state, songsById, onAction }: Props) {
+export function GameBoard({ playerId, state, songsById, onAction, onLeave }: Props) {
   // Two *non-active-player* elements: `audioRef` is the real, invisible
   // "dumb follower" that produces their actual sound (unchanged from
   // before); `visualAudioRef` is a second, muted, click-through copy that
@@ -513,16 +539,28 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
   >("loading");
 
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<GameAction["type"] | null>(null);
+  const pendingActionRef = useRef<GameAction["type"] | null>(null);
 
   // Wraps every button's action: clears any previous error, sends it, and
   // surfaces a new one if the server rejects it (e.g. a stale poll made a
   // button clickable for a moment after it stopped being valid).
-  async function act(action: GameAction) {
+  async function act(action: GameAction, trackPending = true): Promise<void> {
+    if (trackPending && pendingActionRef.current !== null) return;
     setActionError(null);
+    if (trackPending) {
+      pendingActionRef.current = action.type;
+      setPendingAction(action.type);
+    }
     try {
       await onAction(action);
     } catch (error) {
       setActionError(errorMessage(error));
+    } finally {
+      if (trackPending) {
+        pendingActionRef.current = null;
+        setPendingAction(null);
+      }
     }
   }
 
@@ -536,7 +574,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
   async function mirror(action: GameAction) {
     setSyncing(true);
     try {
-      await act(action);
+      await act(action, false);
     } finally {
       setSyncing(false);
     }
@@ -650,10 +688,14 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
     // real players (see game.ts's finishRound/loadNextSong).
     return (
       <div className="stack">
-        <h2>Game over!</h2>
-        <p className="blob blob-success">
+        <h1 className="screen-heading">Game over!</h1>
+        <p className="blob blob-success" role="status" aria-live="polite">
           <IconCrown /> {state.players[state.phase.winnerId]!.name} wins!
         </p>
+        <div className="card game-over-actions stack-sm">
+          <p>Thanks for playing. Leave the room to return home.</p>
+          <button className="btn btn-primary" onClick={onLeave}>Back to home</button>
+        </div>
         <PlayerSummary state={state} songsById={songsById} viewerId={playerId} />
         <EventLog entries={state.log} />
       </div>
@@ -733,7 +775,8 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
   const status = myStatusLine(state, playerId);
   return (
     <div className="stack">
-      <p className={`blob blob-${status.tone}`}>{status.text}</p>
+      <h1 className="visually-hidden">Game in progress</h1>
+      <p className={`blob blob-${status.tone}`} role="status" aria-live="polite" aria-atomic="true">{status.text}</p>
 
       <div className="game-layout">
         <div className="main-column">
@@ -754,11 +797,13 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
               onReveal={() => act({ type: "REVEAL" })}
               onClaimToken={() => act({ type: "CLAIM_GUESS_TOKEN" })}
               onNextTurn={() => act({ type: "NEXT_TURN" })}
+              pendingAction={pendingAction}
             />
           )}
 
           {state.playback && (
-            <div className="card">
+            <div className="card playback-card stack-sm">
+              <h2>Now playing</h2>
               {isActive ? (
             // The active player gets one real, native, directly
             // interactive element — no separate invisible twin, no
@@ -863,18 +908,17 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                   }, POLL_INTERVAL_MS);
                 }}
               />
-              <br />
               {locked ? (
-                <span>Paused — waiting for everyone to catch up…</span>
+                <span className="playback-status" role="status" aria-live="polite" aria-atomic="true">Paused — waiting for everyone to catch up…</span>
               ) : syncing ? (
-                <span>Syncing with server…</span>
+                <span className="playback-status" role="status" aria-live="polite" aria-atomic="true">Syncing with server…</span>
               ) : (
                 // Only the loading/buffering states get a label here — the
                 // native controls above already show play/pause visually,
                 // so a "Playing"/"Paused" label would just be redundant for
                 // the one player who can see and touch them directly.
                 (audioStatus === "loading" || audioStatus === "buffering") && (
-                  <span>{audioStatus === "loading" ? "Loading song…" : "Buffering…"}</span>
+                  <span className="playback-status" role="status" aria-live="polite" aria-atomic="true">{audioStatus === "loading" ? "Loading song…" : "Buffering…"}</span>
                 )
               )}
             </>
@@ -928,9 +972,14 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                 preload="auto"
                 style={{ pointerEvents: "none" }}
                 tabIndex={-1}
+                aria-hidden="true"
               />
-              <br />
-              <span>
+              <span
+                className="playback-status"
+                role={audioStatus === "loading" || audioStatus === "buffering" ? "status" : undefined}
+                aria-live={audioStatus === "loading" || audioStatus === "buffering" ? "polite" : undefined}
+                aria-atomic={audioStatus === "loading" || audioStatus === "buffering" ? "true" : undefined}
+              >
                 {audioStatus === "loading" && "Loading song…"}
                 {audioStatus === "buffering" && "Buffering…"}
                 {audioStatus === "playing" && "Playing"}
@@ -952,6 +1001,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
               timeline={me.timeline}
               songsById={songsById}
               onConfirm={(position) => act({ type: "CONFIRM_PLACEMENT", position })}
+              pending={pendingAction === "CONFIRM_PLACEMENT"}
             />
           )}
 
@@ -974,6 +1024,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                 claimedSlots={claimedSlots}
                 onAttempt={(position) => act({ type: "STEAL_ATTEMPT", position })}
                 onPass={() => act({ type: "PASS" })}
+                pendingAction={pendingAction === "STEAL_ATTEMPT" || pendingAction === "PASS" ? pendingAction : null}
               />
             )}
 
@@ -1009,7 +1060,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
               </div>
             )}
 
-          {actionError && <p className="blob blob-danger blob-sm">{actionError}</p>}
+          {actionError && <p className="blob blob-danger blob-sm" role="alert">{actionError}</p>}
         </div>
 
         <div className="side-column">

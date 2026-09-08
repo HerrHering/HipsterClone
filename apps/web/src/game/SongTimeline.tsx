@@ -14,6 +14,8 @@ interface Props {
   // range (game.ts's correctInsertionRange), red otherwise. See
   // RevealPanel. Omitted everywhere else.
   positionTones?: Map<number, "success" | "danger">;
+  ariaLabel?: string;
+  describedBy?: string;
 }
 
 // The real, physical-feeling timeline: a row of SongCards with a gap
@@ -35,6 +37,8 @@ export function SongTimeline({
   onSelect,
   claimedSlots,
   positionTones,
+  ariaLabel,
+  describedBy,
 }: Props) {
   const slotCount = timeline.length + 1;
 
@@ -54,6 +58,13 @@ export function SongTimeline({
 
   function renderGap(position: number) {
     const claimedBy = claimedSlots?.get(position);
+    const tone = positionTones?.get(position);
+    const isSelected = position === selected;
+    const context = [
+      isSelected ? "selected" : null,
+      claimedBy ? `claimed by ${claimedBy}` : null,
+      tone === "success" ? "correct position" : tone === "danger" ? "incorrect position" : null,
+    ].filter(Boolean).join(", ");
     return (
       <button
         key={`gap-${position}`}
@@ -61,28 +72,33 @@ export function SongTimeline({
         className={gapClassName(position, claimedBy)}
         disabled={!onSelect || claimedBy !== undefined}
         onClick={() => onSelect?.(position)}
-        aria-label={describeSlot(songsById, timeline, position)}
+        aria-label={`${describeSlot(songsById, timeline, position)}${context ? `, ${context}` : ""}`}
+        aria-pressed={onSelect ? isSelected : undefined}
       >
         <span className="timeline-marker" />
         {claimedBy && <span className="timeline-gap-label">{claimedBy}</span>}
+        {isSelected && !claimedBy && <span className="timeline-gap-state" aria-hidden="true">Selected</span>}
+        {tone && <span className="timeline-result-mark" aria-hidden="true">{tone === "success" ? "✓" : "×"}</span>}
       </button>
     );
   }
 
   return (
-    <div className="timeline-strip">
-      {Array.from({ length: slotCount }, (_, position) => (
-        <Fragment key={position}>
-          {renderGap(position)}
-          {position < timeline.length && (
-            <SongCard
-              songId={timeline[position]!.songId}
-              song={songsById[timeline[position]!.songId]}
-              size="md"
-            />
-          )}
-        </Fragment>
-      ))}
+    <div className="timeline-scroll" role={onSelect ? "group" : undefined} aria-label={ariaLabel} aria-describedby={describedBy}>
+      <div className="timeline-strip">
+        {Array.from({ length: slotCount }, (_, position) => (
+          <Fragment key={position}>
+            {renderGap(position)}
+            {position < timeline.length && (
+              <SongCard
+                songId={timeline[position]!.songId}
+                song={songsById[timeline[position]!.songId]}
+                size="md"
+              />
+            )}
+          </Fragment>
+        ))}
+      </div>
     </div>
   );
 }

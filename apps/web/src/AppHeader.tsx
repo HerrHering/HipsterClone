@@ -28,10 +28,11 @@ export function AppHeader({ roomCode, turnLabel, onLeave }: Props) {
             {roomCode}
           </span>
         )}
-        {turnLabel && <span className="badge badge-accent">{turnLabel}</span>}
+        {turnLabel && <span className="badge badge-accent app-header-turn" title={turnLabel}>{turnLabel}</span>}
         {onLeave && (
-          <button className="btn btn-danger-outline" onClick={onLeave} aria-label="Leave room">
+          <button className="btn btn-danger-outline app-header-leave" onClick={onLeave} aria-label="Leave room" title="Leave room">
             <IconLogOut size={18} />
+            <span className="app-header-leave-label">Leave</span>
           </button>
         )}
       </div>

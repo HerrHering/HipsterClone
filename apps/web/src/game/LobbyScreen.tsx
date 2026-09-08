@@ -22,20 +22,28 @@ export function LobbyScreen({ playerId, state, onStartGame }: Props) {
   // START_GAME (e.g. a player left right as this was clicked) used to only
   // go to console.debug, so this button could look like it did nothing.
   const [startError, setStartError] = useState<string | null>(null);
+  const [startPending, setStartPending] = useState(false);
   async function handleStartGame() {
+    if (startPending) return;
     setStartError(null);
+    setStartPending(true);
     try {
       await onStartGame();
     } catch (error) {
       setStartError(errorMessage(error));
+    } finally {
+      setStartPending(false);
     }
   }
 
   return (
     <div className="stack">
       <div className="card stack-sm">
-        <h2>Lobby</h2>
+        <h1 className="screen-heading">Lobby</h1>
         <p className="divider">Tell your friends to join with the room code above.</p>
+        <p className="lobby-count" role="status" aria-live="polite" aria-atomic="true">
+          {players.length} player{players.length === 1 ? "" : "s"} joined
+        </p>
 
         <div className="player-grid">
           {players.map((player) => (
@@ -58,17 +66,18 @@ export function LobbyScreen({ playerId, state, onStartGame }: Props) {
 
         <button
           className="btn btn-primary"
-          disabled={players.length < MIN_PLAYERS}
+          disabled={players.length < MIN_PLAYERS || startPending}
+          aria-busy={startPending}
           onClick={handleStartGame}
         >
-          Start game
+          {startPending ? "Starting game…" : "Start game"}
         </button>
         {players.length < MIN_PLAYERS && (
           <span className="badge badge-warning">
             Need at least {MIN_PLAYERS} players to start.
           </span>
         )}
-        {startError && <p className="blob blob-danger blob-sm">{startError}</p>}
+        {startError && <p className="blob blob-danger blob-sm" role="alert">{startError}</p>}
       </div>
 
       <EventLog entries={state.log} />

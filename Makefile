@@ -11,7 +11,7 @@ install: ## Install dependencies for local development.
 ci-install: ## Install locked dependencies for CI or a clean local install.
 	npm ci
 
-install-ytdlp: ## Create the local yt-dlp virtual environment required for downloads.
+install-ytdlp: ## Create the local yt-dlp virtual environment required for downloads (ffmpeg is separate).
 	python3 -m venv .venv
 	.venv/bin/pip install -U yt-dlp
 

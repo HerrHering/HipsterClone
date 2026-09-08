@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "predev": "npm run build -w packages/shared",
+    "predev": "node scripts/check-dev-prerequisites.mjs && npm run build -w packages/shared",
     "dev": "concurrently -n web,api \"npm run dev -w apps/web\" \"npm run dev -w apps/api\"",
     "dev:debug": "HIPSTER_DEBUG=1 npm run dev",
     "pretest": "npm run build -w packages/shared",

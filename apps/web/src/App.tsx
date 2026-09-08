@@ -192,13 +192,21 @@ function App() {
       />
 
       <div className="app-shell">
-        {manifestState.status === "loading" && <p>Loading songs…</p>}
+        {manifestState.status === "loading" && (
+          <section className="card status-surface stack-sm" aria-labelledby="loading-songs-heading">
+            <h1 id="loading-songs-heading" className="screen-heading">Getting the game ready</h1>
+            <p role="status" aria-live="polite">Loading songs…</p>
+          </section>
+        )}
 
         {manifestState.status === "error" && (
-          <p className="blob blob-danger">
-            Couldn't load manifest.json ({manifestState.message}). Run{" "}
-            <code>npm run scrape</code> first.
-          </p>
+          <section className="card status-surface stack-sm">
+            <h1 className="screen-heading">Song library unavailable</h1>
+            <p className="blob blob-danger" role="alert">Couldn't load the song library.</p>
+            <p className="technical-detail">
+              manifest.json failed to load ({manifestState.message}). Run <code>npm run scrape</code> first.
+            </p>
+          </section>
         )}
 
         {manifestState.status === "ready" && (
@@ -215,12 +223,13 @@ function App() {
 
             {seat && !gameState && (
               <div className="card stack-sm">
+                <h1 className="screen-heading">Room {seat.roomCode}</h1>
                 {pollError ? (
-                  <p className="blob blob-danger">
+                  <p className="blob blob-danger" role="alert">
                     Couldn't reach room {seat.roomCode}: {pollError}
                   </p>
                 ) : (
-                  <p>Loading room {seat.roomCode}…</p>
+                  <p role="status" aria-live="polite">Loading room {seat.roomCode}…</p>
                 )}
                 <button className="btn btn-danger-outline" onClick={leaveRoom}>
                   Back to home
@@ -235,8 +244,8 @@ function App() {
                     state rather than yanking the player back to a loading
                     screen over what might be one missed request. */}
                 {pollError && (
-                  <span className="badge badge-warning">
-                    (connection hiccup — showing last known state)
+                  <span className="badge badge-warning connection-status" role="status">
+                    Connection interrupted — showing the latest available game state.
                   </span>
                 )}
 
@@ -252,6 +261,7 @@ function App() {
                     state={gameState}
                     songsById={manifestState.songsById}
                     onAction={handleAction}
+                    onLeave={leaveRoom}
                   />
                 )}
               </div>

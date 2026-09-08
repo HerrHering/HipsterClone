@@ -26,36 +26,56 @@ export function HomeScreen({
   // `initialName` so returning players don't have to retype it.
   const [name, setName] = useState(initialName);
   const [roomCode, setRoomCode] = useState("");
+  const [pendingAction, setPendingAction] = useState<"create" | "join" | null>(null);
 
   const trimmedName = name.trim();
 
   return (
-    <div className="card stack">
-      <h2>Play</h2>
+    <form
+      className="card stack home-card"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!trimmedName || pending) return;
+        setPendingAction("create");
+        onCreateRoom(trimmedName);
+      }}
+    >
+      <div className="stack-sm">
+        <h1 className="screen-heading">Play HipsterClone</h1>
+        <p className="screen-subtitle">Listen, place songs in time, and challenge your friends.</p>
+      </div>
 
       <label className="field">
         <span>Your name</span>
         <input
+          id="player-name"
+          name="playerName"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="Alice"
+          autoComplete="name"
+          aria-describedby="name-help"
         />
+        <small id="name-help" className="field-help">Needed whether you host or join.</small>
       </label>
 
-      <button
-        className="btn btn-primary"
-        disabled={!trimmedName || pending}
-        onClick={() => onCreateRoom(trimmedName)}
-      >
-        <IconMusic size={18} /> Create a new room
-      </button>
+      <section className="home-action stack-sm" aria-labelledby="host-heading">
+        <h2 id="host-heading">Host a game</h2>
+        <p className="screen-subtitle">Create a room and share its code.</p>
+        <button className="btn btn-primary" type="submit" disabled={!trimmedName || pending} aria-busy={pendingAction === "create" && pending}>
+          <IconMusic size={18} /> {pendingAction === "create" && pending ? "Creating room…" : "Create a new room"}
+        </button>
+      </section>
 
-      <p className="divider">— or —</p>
+      <p className="divider" aria-hidden="true">or</p>
 
-      <div className="stack-sm">
+      <section className="home-action home-action-secondary stack-sm" aria-labelledby="join-heading">
+        <h2 id="join-heading">Join a game</h2>
         <label className="field">
           <span>Room code</span>
           <input
+            id="room-code"
+            name="roomCode"
             value={roomCode}
             // Room codes are always uppercase (see game.ts's
             // ROOM_CODE_ALPHABET) — uppercasing here means a friend can type
@@ -63,18 +83,36 @@ export function HomeScreen({
             onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
             placeholder="ABCD"
             maxLength={4}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            inputMode="text"
+            aria-describedby="room-code-help"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && trimmedName && roomCode.trim() && !pending) {
+                event.preventDefault();
+                setPendingAction("join");
+                onJoinRoom(roomCode.trim(), trimmedName);
+              }
+            }}
           />
+          <small id="room-code-help" className="field-help">Enter the four-character code from the host.</small>
         </label>
         <button
           className="btn"
+          type="button"
           disabled={!trimmedName || !roomCode.trim() || pending}
-          onClick={() => onJoinRoom(roomCode.trim(), trimmedName)}
+          aria-busy={pendingAction === "join" && pending}
+          onClick={() => {
+            setPendingAction("join");
+            onJoinRoom(roomCode.trim(), trimmedName);
+          }}
         >
-          <IconUsers size={18} /> Join room
+          <IconUsers size={18} /> {pendingAction === "join" && pending ? "Joining room…" : "Join room"}
         </button>
-      </div>
+      </section>
 
-      {error && <p className="blob blob-danger blob-sm">{error}</p>}
-    </div>
+      {error && <p className="blob blob-danger blob-sm" role="alert">{error}</p>}
+    </form>
   );
 }

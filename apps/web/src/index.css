@@ -4,7 +4,7 @@
   --bg: #fff;
   --border: #e5e4e7;
   --code-bg: #f4f3ec;
-  --accent: #aa3bff;
+  --accent: #7718bd;
   --accent-bg: rgba(170, 59, 255, 0.1);
   --accent-border: rgba(170, 59, 255, 0.5);
   --social-bg: rgba(244, 243, 236, 0.5);
@@ -15,13 +15,13 @@
      theme above so the existing light/dark split keeps working for free. */
   --surface: #fff;
   --surface-2: var(--code-bg);
-  --success: #1a9c53;
+  --success: #126b39;
   --success-bg: rgba(26, 156, 83, 0.1);
   --success-border: rgba(26, 156, 83, 0.5);
   --danger: #d1293d;
   --danger-bg: rgba(209, 41, 61, 0.1);
   --danger-border: rgba(209, 41, 61, 0.5);
-  --warning: #b5720a;
+  --warning: #754700;
   --warning-bg: rgba(181, 114, 10, 0.12);
   --warning-border: rgba(181, 114, 10, 0.5);
   /* Deliberately a blue, distinct from --accent's purple: --accent already
@@ -31,7 +31,7 @@
   --self: #2f6fed;
   --self-bg: rgba(47, 111, 237, 0.12);
   --self-border: rgba(47, 111, 237, 0.5);
-  --muted-text: #8b8591;
+  --muted-text: #625c69;
   /* A clearly-visible neutral border for interactive elements (plain
      buttons, inputs) — --border alone is too faint once the element it
      outlines sits on a same-toned card/surface background (e.g. the
@@ -147,6 +147,11 @@
 
 body {
   margin: 0;
+  overflow-x: hidden;
+}
+
+main {
+  min-width: 0;
 }
 
 h1,
@@ -202,6 +207,7 @@ p {
      below) — nothing should ever visually spill past the fixed box a
      size variant defines. */
   overflow: hidden;
+  max-width: 100%;
 }
 /* Real fixed width + height (not just min-width) per variant — every
    card in a row shares the same proportions regardless of content
@@ -285,9 +291,25 @@ p {
   border-color: var(--success-border);
   box-shadow: var(--shadow-lg), 0 0 0 3px var(--success-bg);
 }
+.song-card-correct::after,
+.song-card-incorrect::after {
+  align-self: stretch;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  font-weight: 800;
+  line-height: 1.4;
+}
+.song-card-correct::after {
+  content: "✓ Correct";
+  color: var(--success);
+}
 .song-card-incorrect {
   border-color: var(--danger-border);
   box-shadow: var(--shadow-lg), 0 0 0 3px var(--danger-bg);
+}
+.song-card-incorrect::after {
+  content: "× Incorrect";
+  color: var(--danger);
 }
 
 /* SongTimeline (SongTimeline.tsx, replacing the old SlotPicker/.slot-*
@@ -304,11 +326,18 @@ p {
   padding: var(--space-2) 2px var(--space-3);
   -webkit-overflow-scrolling: touch;
 }
+.timeline-scroll {
+  min-width: 0;
+  max-width: 100%;
+  border-inline: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 10px 0 10px -12px var(--text), inset -10px 0 10px -12px var(--text);
+}
 .timeline-gap {
   position: relative;
   flex: 0 0 auto;
-  width: 24px;
-  min-height: 88px;
+  width: 44px;
+  min-height: 44px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -327,11 +356,6 @@ p {
    so hovering/clicking here still counts as hovering/clicking the gap
    button itself. ±16px stays well within half a timeline card's own
    width, so adjacent gaps' extended zones don't meaningfully collide. */
-.timeline-gap::before {
-  content: "";
-  position: absolute;
-  inset: 0 -16px;
-}
 .timeline-gap:disabled {
   cursor: default;
 }
@@ -352,6 +376,28 @@ p {
   width: 5px;
   box-shadow: 0 0 0 6px var(--accent-bg);
 }
+.timeline-gap-state,
+.timeline-result-mark {
+  position: absolute;
+  bottom: 4px;
+  border-radius: var(--radius-lg);
+  padding: 1px 5px;
+  background: var(--surface);
+  border: 1px solid currentColor;
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.timeline-result-mark {
+  bottom: auto;
+  top: 4px;
+  font-size: var(--font-sm);
+}
+.timeline-gap-success .timeline-result-mark { color: var(--success); }
+.timeline-gap-danger .timeline-result-mark { color: var(--danger); }
+.timeline-gap-claimed .timeline-result-mark { top: auto; bottom: 4px; }
 /* A gap someone already claimed this round (the active player's own
    placement, or another voter's steal attempt) — still visible/labeled
    (open-card game), just not pickable by anyone else. */
@@ -451,12 +497,65 @@ code {
    text reads badly for lists, buttons, and cards. */
 .app-shell {
   text-align: left;
-  padding: 0 var(--space-4) var(--space-6);
+  padding: var(--space-4) var(--space-4) var(--space-6);
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   flex: 1;
   box-sizing: border-box;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.screen-heading {
+  font-size: var(--font-xl);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.screen-subtitle,
+.technical-detail,
+.field-help,
+.timeline-instruction,
+.playback-status {
+  color: var(--muted-text);
+}
+.technical-detail,
+.field-help {
+  font-size: var(--font-sm);
+}
+.status-surface,
+.home-card {
+  width: min(100%, 640px);
+  margin-inline: auto;
+}
+.home-action {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.home-action-secondary {
+  background: var(--surface-2);
+}
+.lobby-count {
+  font-weight: 700;
+  color: var(--text-h);
+}
+.playback-card audio[controls] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+.playback-status {
+  min-height: 1.45em;
 }
 
 /* RevealPanel's hero moment — the revealed SongCard next to its color-coded
@@ -511,6 +610,16 @@ code {
   flex: 1;
   min-width: 0;
 }
+.app-header-turn {
+  min-width: 0;
+  max-width: min(42vw, 280px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-header-leave {
+  min-height: 40px;
+  padding-inline: var(--space-3);
+}
 /* Plain text here (the original version) blended straight into the header
    background — this needs to visibly "pop" since it's the one thing a
    player has to read aloud to friends. A colored pill (same accent tokens
@@ -563,6 +672,8 @@ code {
   box-shadow: var(--shadow);
   padding: var(--space-4);
   box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .card > h3:first-child,
@@ -655,6 +766,13 @@ code {
   cursor: not-allowed;
   box-shadow: none;
 }
+.btn:focus-visible,
+.field input:focus-visible,
+.timeline-gap:focus-visible,
+.event-log summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
 .btn-primary {
   border-color: var(--accent-border);
   background: var(--accent);
@@ -726,7 +844,6 @@ code {
   box-sizing: border-box;
 }
 .field input:focus {
-  outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-bg);
 }
@@ -814,12 +931,7 @@ code {
 }
 @media (max-width: 480px) {
   .player-grid {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(200px, 1fr);
-    grid-template-columns: none;
-    overflow-x: auto;
-    padding-bottom: var(--space-2);
-    -webkit-overflow-scrolling: touch;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 .player-card {
@@ -914,6 +1026,56 @@ code {
 .event-log li:last-child {
   border-bottom: none;
   padding-bottom: 0;
+}
+.event-log-empty {
+  color: var(--muted-text);
+  font-style: italic;
+}
+
+@media (max-width: 600px) {
+  .app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    padding: var(--space-2) var(--space-3);
+  }
+  .app-header-info { display: contents; }
+  .app-header-brand { grid-column: 1; grid-row: 1; }
+  .app-header-leave { grid-column: 2; grid-row: 1; }
+  .app-header-room { grid-column: 1; grid-row: 2; justify-self: start; min-width: 0; max-width: 100%; }
+  .app-header-turn { grid-column: 2; grid-row: 2; max-width: 48vw; }
+  .connection-status { white-space: normal; line-height: 1.35; }
+}
+
+@media (max-width: 360px) {
+  .app-shell { padding: var(--space-3) var(--space-2) var(--space-5); }
+  .card { padding: var(--space-3); }
+  .app-header-room-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .app-header-leave-label { display: none; }
+  .app-header-leave { width: 40px; padding: 0; }
+  .song-card-lg { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .timeline-marker,
+  .event-log summary::after { transition: none; }
+  .btn:active:not(:disabled) { transform: none; }
+}
+
+@media (forced-colors: active) {
+  .btn:focus-visible,
+  .field input:focus-visible,
+  .timeline-gap:focus-visible,
+  .event-log summary:focus-visible { outline-color: Highlight; }
+  .timeline-gap-selected .timeline-marker,
+  .timeline-gap-success .timeline-marker,
+  .timeline-gap-danger .timeline-marker { background: Highlight; border: 2px solid ButtonText; }
+  .player-card.is-active,
+  .player-card.is-me,
+  .song-card-correct,
+  .song-card-incorrect,
+  .blob-danger { border: 2px solid ButtonText; }
 }
 @media (min-width: 860px) {
   .event-log summary::after {

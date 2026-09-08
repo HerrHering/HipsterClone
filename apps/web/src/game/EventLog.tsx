@@ -26,6 +26,7 @@ export function EventLog({ entries }: Props) {
     <details className="card event-log">
       <summary>Activity</summary>
       <ul ref={listRef}>
+        {entries.length === 0 && <li className="event-log-empty">No activity yet.</li>}
         {entries.map((entry, index) => (
           // Plain strings, no id — game.ts's log is append-only apart from
           // the occasional trim of its oldest lines (see MAX_LOG_ENTRIES),
