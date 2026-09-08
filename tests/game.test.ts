@@ -188,4 +188,130 @@ describe("game rooms", () => {
       year: currentSong.year,
     });
   });
+
+  it("rejects invalid rooms, players, and actions for the current phase", async () => {
+    const game = await import("../apps/api/src/game.ts");
+    expect(game.getState("NOPE")).toBeNull();
+    expect(() => game.joinRoom("NOPE", "Guest")).toThrow("no room");
+    await expect(
+      game.applyAction("NOPE", "player", { type: "PLAY" }),
+    ).rejects.toThrow("no room");
+
+    const created = game.createRoom("Host");
+    await expect(
+      game.applyAction(created.roomCode, "player", { type: "PLAY" }),
+    ).rejects.toThrow("no player");
+    game.joinRoom(created.roomCode, "Guest");
+    const state = await game.applyAction(created.roomCode, created.playerId, {
+      type: "START_GAME",
+    });
+    state.playback = null;
+    await expect(
+      game.applyAction(created.roomCode, state.turnOrder[0]!, { type: "PLAY" }),
+    ).rejects.toThrow('no song is loaded');
+  });
+
+  it("pauses playback, advances a revealed round, and rejects a second start", async () => {
+    const { game, roomCode, hostId, state } = await startedGame();
+    const activeId = state.turnOrder[0]!;
+
+    await game.applyAction(roomCode, activeId, { type: "PLAY" });
+    await game.applyAction(roomCode, activeId, { type: "PAUSE" });
+    expect(state.playback?.isPlaying).toBe(false);
+    await expect(
+      game.applyAction(roomCode, hostId, { type: "START_GAME" }),
+    ).rejects.toThrow("already started");
+
+    await game.applyAction(roomCode, activeId, {
+      type: "CONFIRM_PLACEMENT",
+      position: 0,
+    });
+    const otherId = state.turnOrder[1]!;
+    await game.applyAction(roomCode, otherId, { type: "PASS" });
+    await game.applyAction(roomCode, activeId, { type: "REVEAL" });
+    await expect(
+      game.applyAction(roomCode, otherId, { type: "NEXT_TURN" }),
+    ).rejects.toThrow("only the active player");
+    await game.applyAction(roomCode, activeId, { type: "NEXT_TURN" });
+    expect(state.phase.type).toBe("playingSong");
+  });
+
+  it("enforces steal vote and token rules", async () => {
+    const { game, roomCode, state } = await startedGame();
+    const activeId = state.turnOrder[0]!;
+    const stealerId = state.turnOrder[1]!;
+    await game.applyAction(roomCode, activeId, {
+      type: "CONFIRM_PLACEMENT",
+      position: 0,
+    });
+
+    await expect(
+      game.applyAction(roomCode, activeId, {
+        type: "STEAL_ATTEMPT",
+        position: 1,
+      }),
+    ).rejects.toThrow("can't steal");
+    await expect(
+      game.applyAction(roomCode, stealerId, {
+        type: "STEAL_ATTEMPT",
+        position: 0,
+      }),
+    ).rejects.toThrow("already claimed");
+
+    state.players[stealerId]!.tokens = 0;
+    await expect(
+      game.applyAction(roomCode, stealerId, {
+        type: "STEAL_ATTEMPT",
+        position: 1,
+      }),
+    ).rejects.toThrow("no tokens");
+  });
+
+  it("discards an incorrectly placed card when nobody steals it", async () => {
+    const { game, roomCode, state } = await startedGame();
+    const activeId = state.turnOrder[0]!;
+    const otherId = state.turnOrder[1]!;
+    const phase = state.phase;
+    if (phase.type !== "playingSong") throw new Error("expected playingSong");
+    const song = testData.manifest.songs.find((entry) => entry.id === phase.songId)!;
+    const active = state.players[activeId]!;
+    const correctPosition = active.timeline.filter(
+      (card) => card.year < song.year,
+    ).length;
+
+    await game.applyAction(roomCode, activeId, {
+      type: "CONFIRM_PLACEMENT",
+      position: correctPosition === 0 ? 1 : 0,
+    });
+    await game.applyAction(roomCode, otherId, { type: "PASS" });
+    await game.applyAction(roomCode, activeId, { type: "REVEAL" });
+
+    expect(state.phase).toMatchObject({
+      type: "reveal",
+      activePlacementCorrect: false,
+      stolenBy: null,
+    });
+    expect(active.timeline).toHaveLength(1);
+  });
+
+  it("ends the game when a player reaches the win target", async () => {
+    const { game, roomCode, state } = await startedGame();
+    const activeId = state.turnOrder[0]!;
+    const otherId = state.turnOrder[1]!;
+    const phase = state.phase;
+    if (phase.type !== "playingSong") throw new Error("expected playingSong");
+    const song = testData.manifest.songs.find((entry) => entry.id === phase.songId)!;
+    const active = state.players[activeId]!;
+    state.settings.winTarget = 2;
+
+    await game.applyAction(roomCode, activeId, {
+      type: "CONFIRM_PLACEMENT",
+      position: active.timeline.filter((card) => card.year < song.year).length,
+    });
+    await game.applyAction(roomCode, otherId, { type: "PASS" });
+    await game.applyAction(roomCode, activeId, { type: "REVEAL" });
+
+    expect(state.phase).toEqual({ type: "gameOver", winnerId: activeId });
+    expect(state.playback).toBeNull();
+  });
 });

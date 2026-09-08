@@ -18,7 +18,7 @@ install-ytdlp: ## Create the local yt-dlp virtual environment required for downl
 dev: ## Start the web client and API development servers.
 	npm run dev
 
-test: ## Run the automated test suite.
+test: ## Run automated tests and enforce more than 80% coverage.
 	npm test
 
 test-watch: ## Run tests in watch mode.
