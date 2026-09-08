@@ -3,6 +3,7 @@ import type { SongManifestEntry, TimelineCard } from "@hipster-clone/shared";
 import {
   describeSlot,
   describeSong,
+  describeTimelineGap,
   type SongLookup,
 } from "../apps/web/src/game/songText.ts";
 
@@ -39,7 +40,7 @@ describe("song display text", () => {
     expect(describeSong(songsById, "old")).toBe(
       "Old Song — First Artist (1970)",
     );
-    expect(describeSong(songsById, "missing")).toBe("missing");
+    expect(describeSong(songsById, "missing")).toBe("missing — unknown song details");
   });
 
   it("describes every kind of timeline insertion slot", () => {
@@ -55,5 +56,13 @@ describe("song display text", () => {
     expect(describeSlot(songsById, timeline, 2)).toBe(
       "after New Song — Second Artist (1990)",
     );
+  });
+
+  it("uses compact year-only gap names, including ties", () => {
+    expect(describeTimelineGap([], 0)).toBe("Start timeline");
+    const ties = [{ songId: "a", year: 1990 }, { songId: "b", year: 1990 }];
+    expect(describeTimelineGap(ties, 0)).toBe("Before 1990");
+    expect(describeTimelineGap(ties, 1)).toBe("Between 1990 and 1990");
+    expect(describeTimelineGap(ties, 2)).toBe("After 1990");
   });
 });

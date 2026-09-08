@@ -4,7 +4,9 @@ import { useFitText } from "./useFitText";
 interface Props {
   songId: string;
   song: SongManifestEntry | undefined;
+  year?: number;
   size?: "sm" | "md" | "lg";
+  yearOnly?: boolean;
   tone?: "default" | "correct" | "incorrect";
   // e.g. "claimed by Alice" — replaces SlotPicker's old inline text.
   footer?: string;
@@ -16,18 +18,19 @@ interface Props {
 // impossible to miss), title on the bottom. Falls back to the raw id if the
 // manifest hasn't loaded this song (mirrors GameBoard.tsx's own
 // describeSong fallback) rather than rendering nothing.
-export function SongCard({ songId, song, size = "md", tone = "default", footer, className }: Props) {
+export function SongCard({ songId, song, year, size = "md", yearOnly = false, tone = "default", footer, className }: Props) {
   const sizeClass = size === "sm" ? "song-card-sm" : size === "lg" ? "song-card-lg" : "song-card-md";
   const toneClass =
     tone === "correct" ? "song-card-correct" : tone === "incorrect" ? "song-card-incorrect" : "";
-  const classes = ["song-card", sizeClass, toneClass, className].filter(Boolean).join(" ");
+  const classes = ["song-card", sizeClass, yearOnly && "song-card-year-only", toneClass, className].filter(Boolean).join(" ");
   const titleRef = useFitText<HTMLSpanElement>(song?.title ?? "");
+  const accessibleName = song ? `${song.title} by ${song.artist}, ${year ?? song.year}` : `${songId}, unknown song details, ${year ?? "unknown year"}`;
 
   return (
-    <div className={classes}>
-      <span className="song-card-artist">{song?.artist ?? songId}</span>
-      <span className="song-card-year">{song?.year ?? "?"}</span>
-      {song && (
+    <div className={classes} title={accessibleName} aria-label={accessibleName}>
+      {!yearOnly && <span className="song-card-artist">{song?.artist ?? "Unknown artist"}</span>}
+      <span className="song-card-year">{year ?? song?.year ?? "?"}</span>
+      {!yearOnly && song && (
         <span ref={titleRef} className="song-card-title">
           {song.title}
         </span>
