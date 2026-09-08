@@ -113,10 +113,11 @@ Shows every yt-dlp candidate considered, cache hits/misses, the exact download c
 ## Before opening a PR
 
 ```bash
+npm test       # runs the automated test suite
 npm run build   # type-checks + builds all three real workspaces
 npm run lint    # oxlint on apps/web
 ```
-Both must pass clean. No automated test suite exists yet.
+All three must pass clean.
 
 ## Project structure
 
