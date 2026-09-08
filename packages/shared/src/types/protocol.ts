@@ -133,6 +133,14 @@ export interface GameState {
   // Every songId already played this game, win or lose or stolen — checked
   // by game.ts's song picker so the same song never comes up twice in one game.
   usedSongIds: string[];
+  // The song reserved to load at the next NEXT_TURN/START_GAME call — already
+  // pushed into usedSongIds so it can never be picked twice, and already known
+  // one turn ahead so the client can prefetch its audio while the current song
+  // is still playing (see game.ts's loadNextSong/pickNextSong). null only in
+  // the degenerate case where every song in the whole catalog is currently
+  // held in some player's timeline — the next loadNextSong call is what
+  // actually ends the game then, same as an ordinary empty catalog always has.
+  nextSongId: string | null;
   settings: GameSettings;
   // null only in `lobby` — every other phase has a song loaded.
   playback: PlaybackState | null;

@@ -62,3 +62,11 @@ export function sendAction(
     action,
   });
 }
+
+// Warms apps/api's audio cache for a song ahead of playback — see
+// server.ts's /prefetch route. No body to send, unlike the POSTs above.
+export function prefetchAudio(songId: string): Promise<{ cached: boolean }> {
+  return requestJson<{ cached: boolean }>(`/api/audio/${songId}/prefetch`, {
+    method: "POST",
+  });
+}

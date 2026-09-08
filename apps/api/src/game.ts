@@ -94,6 +94,7 @@ export function createRoom(hostName: string): {
     turnOrder: [],
     currentTurnIndex: 0,
     usedSongIds: [],
+    nextSongId: null,
     settings: { winTarget: WIN_TARGET, libraryVersion: "1" },
     playback: null,
     log: [],
@@ -152,6 +153,32 @@ function pickRandomUnusedSong(
   // Safe: index is always < available.length, but noUncheckedIndexedAccess
   // can't see that from the length check above, only from the type itself.
   return available[Math.floor(Math.random() * available.length)]!;
+}
+
+// Picks the next song to play, reshuffling the discard pile back in once
+// every song has been used at least once. "Reshuffle" means resetting
+// usedSongIds down to just the songs currently held in a player's
+// timeline — never a song that was played and then discarded (nobody
+// guessed it) or has changed hands since, only ones a player would
+// instantly recognize a second play of. Returns null only if literally
+// every song in the catalog is currently held by someone — loadNextSong's
+// existing "no song available" branch still ends the game gracefully then.
+function pickNextSong(
+  state: GameState,
+  catalog: SongManifestEntry[],
+): SongManifestEntry | null {
+  const song = pickRandomUnusedSong(catalog, state.usedSongIds);
+  if (song) {
+    return song;
+  }
+  state.usedSongIds = Object.values(state.players).flatMap((player) =>
+    player.timeline.map((card) => card.songId),
+  );
+  const reshuffled = pickRandomUnusedSong(catalog, state.usedSongIds);
+  if (reshuffled) {
+    pushLog(state, "Every song has been played — reshuffling the deck.");
+  }
+  return reshuffled;
 }
 
 // Where `year` belongs among `timeline`'s cards, as a single index (0 =
@@ -237,6 +264,7 @@ async function finishRound(
   if (requirePlayer(state, winnerId).timeline.length >= state.settings.winTarget) {
     state.phase = { type: "gameOver", winnerId };
     state.playback = null;
+    state.nextSongId = null;
     pushLog(state, `${requirePlayer(state, winnerId).name} wins the game!`);
   } else {
     state.phase = {
@@ -293,27 +321,34 @@ function shuffledPlayerIds(players: GameState["players"]): string[] {
 
 // Loads a fresh song into `playingSong` for whoever's turn it now is,
 // mutating `state` in place. Shared by START_GAME (first turn) and
-// NEXT_TURN (every turn after). If the catalog has run out of unused songs
-// — a real possibility with a small hand-curated catalog — ends the game
-// instead, crowning whoever has the most cards, rather than crashing.
+// NEXT_TURN (every turn after). Consumes whatever the *previous* call
+// already peeked ahead into `state.nextSongId` (see below) — the very
+// first call this game (from START_GAME) has nothing peeked yet, so falls
+// back to picking fresh. If nothing is available even after pickNextSong's
+// own reshuffle attempt — every catalog song is currently held by some
+// player — ends the game instead, crowning whoever has the most cards,
+// rather than crashing.
 function loadNextSong(state: GameState, catalog: SongManifestEntry[]): void {
-  const song = pickRandomUnusedSong(catalog, state.usedSongIds);
-  if (!song) {
+  const songId = state.nextSongId ?? pickNextSong(state, catalog)?.id ?? null;
+  if (!songId) {
     const winner = Object.values(state.players).reduce((best, player) =>
       player.timeline.length > best.timeline.length ? player : best,
     );
     state.phase = { type: "gameOver", winnerId: winner.id };
     state.playback = null;
+    state.nextSongId = null;
     pushLog(state, `${winner.name} wins the game!`);
     return;
   }
 
-  state.usedSongIds.push(song.id);
-  state.phase = { type: "playingSong", songId: song.id };
+  if (!state.usedSongIds.includes(songId)) {
+    state.usedSongIds.push(songId);
+  }
+  state.phase = { type: "playingSong", songId };
   // Loaded but not playing yet — the active player has to press Play
   // themselves, same as picking up the physical card and starting the clip.
   state.playback = {
-    songId: song.id,
+    songId,
     isPlaying: false,
     positionSec: 0,
     updatedAt: Date.now(),
@@ -321,6 +356,13 @@ function loadNextSong(state: GameState, catalog: SongManifestEntry[]): void {
   // Never the song itself — that stays hidden until its own reveal phase.
   const nextActive = requirePlayer(state, currentPlayerId(state)!);
   pushLog(state, `It's ${nextActive.name}'s turn.`);
+
+  // Peek one turn further ahead so the client can start prefetching this
+  // song's audio while the one that just loaded above is still playing —
+  // reserved in usedSongIds immediately (inside pickNextSong) so the next
+  // loadNextSong call above is guaranteed to consume exactly this song,
+  // never a different random pick.
+  state.nextSongId = pickNextSong(state, catalog)?.id ?? null;
 }
 
 export async function applyAction(

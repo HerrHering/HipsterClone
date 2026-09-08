@@ -12,6 +12,7 @@ import {
   errorMessage,
 } from "@hipster-clone/shared";
 import { safeLocalStorageGet, safeLocalStorageSet } from "../localStorage";
+import { prefetchAudio } from "./api";
 import { EventLog } from "./EventLog";
 import { POLL_INTERVAL_MS } from "./useGameState";
 
@@ -626,6 +627,26 @@ export function GameBoard({ roomCode, playerId, state, songsById, onAction }: Pr
       }
     }
   }, [state]);
+
+  // Prefetches the *next* song's audio while the current one is still being
+  // played out, so the download (yt-dlp can take a few seconds on a cache
+  // miss) has already happened by the time NEXT_TURN loads it — same
+  // fire-and-forget style as audio.play() above. A ref (not state) tracks
+  // the last id already prefetched so this fires once per song, not once
+  // per poll tick. Every player's phone independently fires this, not just
+  // the active player's — harmless, since ensureCached's in-flight dedupe
+  // collapses redundant calls into one real download.
+  const prefetchedSongIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nextSongId = state.nextSongId;
+    if (!nextSongId || prefetchedSongIdRef.current === nextSongId) {
+      return;
+    }
+    prefetchedSongIdRef.current = nextSongId;
+    void prefetchAudio(nextSongId).catch((error: unknown) => {
+      console.error("prefetchAudio() failed:", error);
+    });
+  }, [state.nextSongId]);
 
   if (state.phase.type === "gameOver") {
     // `!`: same invariant as myStatusLine's own gameOver case below —
