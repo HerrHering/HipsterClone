@@ -17,8 +17,8 @@ export interface TimelineCard {
 export interface PlayerState {
   id: PlayerId;
   name: string;
-  // Sorted by year ascending — see game.ts's correctInsertionIndex, which is
-  // the one place cards get inserted and is what keeps this sorted.
+  // Sorted by year ascending — see game.ts's insertCard/correctInsertionRange,
+  // which is the one place cards get inserted and is what keeps this sorted.
   timeline: TimelineCard[];
   tokens: number;
 }
@@ -102,10 +102,20 @@ export type GamePhase =
       type: "reveal";
       songId: string;
       correctYear: number;
-      // Index into the active player's timeline — the one shared answer
-      // every vote (and the active player's own placement) was judged
-      // against.
-      correctPosition: number;
+      // The inclusive range of insertion indices that counted as correct —
+      // the one shared answer every vote (and the active player's own
+      // placement) was judged against. low === high except when the song's
+      // year exactly ties an existing card's year in the active player's
+      // timeline, in which case both sides of the tie (and everywhere
+      // between, for a multi-way tie) count equally as correct — see
+      // game.ts's correctInsertionRange.
+      correctPositionRange: { low: number; high: number };
+      // Preserved from the resolved "pendingReveal" phase purely for
+      // display — lets the client re-render the same vote markers from
+      // before the reveal, now colored by correctness, instead of them
+      // just disappearing once the round resolves.
+      activePlacementPosition: number;
+      votes: { playerId: PlayerId; position: number | null }[];
       activePlacementCorrect: boolean;
       // null covers both "nobody attempted a steal" and "everyone who did
       // guessed wrong" — either way, nobody stole the card.
@@ -128,6 +138,12 @@ export interface GameSettings {
 export interface GameState {
   phase: GamePhase;
   players: Record<PlayerId, PlayerState>;
+  // Set once, in createRoom, to the id of whoever created the room — never
+  // reassigned even if the host later disconnects (there's no "migrate
+  // host" mechanic). Purely informational (a badge in the lobby/scoreboard
+  // so a joining player can tell who's who); nothing in game.ts gates any
+  // action on being the host.
+  hostId: PlayerId;
   turnOrder: PlayerId[];
   currentTurnIndex: number;
   // Every songId already played this game, win or lose or stolen — checked

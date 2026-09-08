@@ -91,6 +91,7 @@ export function createRoom(hostName: string): {
   const state: GameState = {
     phase: { type: "lobby" },
     players: { [host.id]: host },
+    hostId: host.id,
     turnOrder: [],
     currentTurnIndex: 0,
     usedSongIds: [],
@@ -181,23 +182,49 @@ function pickNextSong(
   return reshuffled;
 }
 
-// Where `year` belongs among `timeline`'s cards, as a single index (0 =
-// before everything, timeline.length = after everything). Simplification:
-// when two existing cards share a year, only the one canonical index
-// counts as "correct" — good enough for a barebones MVP, and exact ties are
-// rare in a real song catalog.
-function correctInsertionIndex(timeline: TimelineCard[], year: number): number {
-  let index = 0;
+// Returns the inclusive [low, high] range of insertion indices that are
+// equally correct for `year` among `timeline`'s cards: low = the count of
+// cards strictly before it, high = the count of cards at-or-before it.
+// low === high when there's no tie (the single answer this used to always
+// return); low < high exactly when `year` matches one or more existing
+// cards' years, in which case every index in [low, high] is an equally
+// valid placement — there's no way to know which of two same-year songs
+// "really" came first, so neither side of the tie should be treated as the
+// only correct answer. Preserves sort order for any position spliced in
+// anywhere within [low, high]: everything before it is <= year, everything
+// from it onward is >= year, either way.
+function correctInsertionRange(
+  timeline: TimelineCard[],
+  year: number,
+): { low: number; high: number } {
+  let low = 0;
+  let high = 0;
   for (const card of timeline) {
     if (card.year < year) {
-      index++;
+      low++;
+      high++;
+    } else if (card.year === year) {
+      high++;
     }
   }
-  return index;
+  return { low, high };
 }
 
-function insertCard(player: PlayerState, songId: string, year: number): void {
-  const position = correctInsertionIndex(player.timeline, year);
+function isWithinRange(range: { low: number; high: number }, position: number): boolean {
+  return position >= range.low && position <= range.high;
+}
+
+// `position` is trusted to already be a validated, in-range index (checked
+// by the caller against correctInsertionRange) — inserting at the actual
+// guessed position, rather than recomputing a canonical one, means a tied
+// card visually lands exactly where the winning guesser pointed instead of
+// potentially snapping to the other side of the tie.
+function insertCard(
+  player: PlayerState,
+  songId: string,
+  year: number,
+  position: number,
+): void {
   player.timeline.splice(position, 0, { songId, year });
 }
 
@@ -231,21 +258,23 @@ async function finishRound(
   }
 
   const activePlayer = requirePlayer(state, activeId);
-  const correctPosition = correctInsertionIndex(activePlayer.timeline, song.year);
-  const activePlacementCorrect = phase.activePlacementPosition === correctPosition;
+  const correctRange = correctInsertionRange(activePlayer.timeline, song.year);
+  const activePlacementCorrect = isWithinRange(correctRange, phase.activePlacementPosition);
 
   let stolenBy: string | null = null;
   if (activePlacementCorrect) {
-    insertCard(activePlayer, song.id, song.year);
+    insertCard(activePlayer, song.id, song.year, phase.activePlacementPosition);
   } else {
-    // First (in submission order) vote whose guess matches the correct
-    // position steals the card — a pass, or a wrong guess, costs the
+    // First (in submission order) vote whose guess falls anywhere in the
+    // correct range steals the card — a pass, or a wrong guess, costs the
     // voter nothing further (a wrong steal attempt already spent its
     // token when it was recorded).
-    const winner = phase.votes.find((vote) => vote.position === correctPosition);
+    const winner = phase.votes.find(
+      (vote) => vote.position !== null && isWithinRange(correctRange, vote.position),
+    );
     if (winner) {
       stolenBy = winner.playerId;
-      insertCard(requirePlayer(state, winner.playerId), song.id, song.year);
+      insertCard(requirePlayer(state, winner.playerId), song.id, song.year, winner.position!);
     }
     // If nobody guessed right, the card is simply discarded — nobody's
     // timeline changes, matching the physical game's rule.
@@ -271,7 +300,9 @@ async function finishRound(
       type: "reveal",
       songId: phase.songId,
       correctYear: song.year,
-      correctPosition,
+      correctPositionRange: correctRange,
+      activePlacementPosition: phase.activePlacementPosition,
+      votes: phase.votes,
       activePlacementCorrect,
       stolenBy,
       guessTokenClaimed: false,

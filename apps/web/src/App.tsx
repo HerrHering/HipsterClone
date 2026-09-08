@@ -4,7 +4,8 @@ import type {
   SongManifest,
   SongManifestEntry,
 } from "@hipster-clone/shared";
-import { errorMessage } from "@hipster-clone/shared";
+import { currentPlayerId, errorMessage } from "@hipster-clone/shared";
+import { AppHeader } from "./AppHeader";
 import { GameBoard } from "./game/GameBoard";
 import { HomeScreen } from "./game/HomeScreen";
 import { LobbyScreen } from "./game/LobbyScreen";
@@ -166,15 +167,35 @@ function App() {
     applyState(next);
   }
 
+  // A compact "whose turn" badge for the sticky header — distinct from
+  // GameBoard's own, more detailed myStatusLine blob, which covers every
+  // phase (voting, reveal, etc.), not just "whose turn is it."
+  const turnLabel =
+    gameState && seat && gameState.phase.type !== "lobby" && gameState.phase.type !== "gameOver"
+      ? (() => {
+          const activeId = currentPlayerId(gameState);
+          if (!activeId) {
+            return undefined;
+          }
+          return activeId === seat.playerId
+            ? "Your turn"
+            : `${gameState.players[activeId]?.name ?? "?"}'s turn`;
+        })()
+      : undefined;
+
   return (
     <main>
-      <h1>HipsterClone</h1>
+      <AppHeader
+        roomCode={seat?.roomCode}
+        turnLabel={turnLabel}
+        onLeave={seat ? leaveRoom : undefined}
+      />
 
       <div className="app-shell">
         {manifestState.status === "loading" && <p>Loading songs…</p>}
 
         {manifestState.status === "error" && (
-          <p className="alert">
+          <p className="blob blob-danger">
             Couldn't load manifest.json ({manifestState.message}). Run{" "}
             <code>npm run scrape</code> first.
           </p>
@@ -195,7 +216,7 @@ function App() {
             {seat && !gameState && (
               <div className="card stack-sm">
                 {pollError ? (
-                  <p className="alert">
+                  <p className="blob blob-danger">
                     Couldn't reach room {seat.roomCode}: {pollError}
                   </p>
                 ) : (
@@ -214,31 +235,25 @@ function App() {
                     state rather than yanking the player back to a loading
                     screen over what might be one missed request. */}
                 {pollError && (
-                  <span className="badge badge-muted">
+                  <span className="badge badge-warning">
                     (connection hiccup — showing last known state)
                   </span>
                 )}
 
                 {gameState.phase.type === "lobby" ? (
                   <LobbyScreen
-                    roomCode={seat.roomCode}
                     playerId={seat.playerId}
                     state={gameState}
                     onStartGame={() => handleAction({ type: "START_GAME" })}
                   />
                 ) : (
                   <GameBoard
-                    roomCode={seat.roomCode}
                     playerId={seat.playerId}
                     state={gameState}
                     songsById={manifestState.songsById}
                     onAction={handleAction}
                   />
                 )}
-
-                <button className="btn btn-danger-outline" onClick={leaveRoom}>
-                  Leave room
-                </button>
               </div>
             )}
           </>

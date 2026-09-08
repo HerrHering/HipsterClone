@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { IconMusic, IconUsers } from "../icons";
 
 interface Props {
   // Whatever App.tsx already had remembered in localStorage from the last
@@ -46,7 +47,7 @@ export function HomeScreen({
         disabled={!trimmedName || pending}
         onClick={() => onCreateRoom(trimmedName)}
       >
-        Create a new room
+        <IconMusic size={18} /> Create a new room
       </button>
 
       <p className="divider">— or —</p>
@@ -69,11 +70,11 @@ export function HomeScreen({
           disabled={!trimmedName || !roomCode.trim() || pending}
           onClick={() => onJoinRoom(roomCode.trim(), trimmedName)}
         >
-          Join room
+          <IconUsers size={18} /> Join room
         </button>
       </div>
 
-      {error && <p className="alert">{error}</p>}
+      {error && <p className="blob blob-danger blob-sm">{error}</p>}
     </div>
   );
 }

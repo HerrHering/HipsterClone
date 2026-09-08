@@ -16,11 +16,21 @@
   --surface: #fff;
   --surface-2: var(--code-bg);
   --success: #1a9c53;
+  --success-bg: rgba(26, 156, 83, 0.1);
+  --success-border: rgba(26, 156, 83, 0.5);
   --danger: #d1293d;
   --danger-bg: rgba(209, 41, 61, 0.1);
+  --danger-border: rgba(209, 41, 61, 0.5);
   --warning: #b5720a;
   --warning-bg: rgba(181, 114, 10, 0.12);
   --warning-border: rgba(181, 114, 10, 0.5);
+  /* Deliberately a blue, distinct from --accent's purple: --accent already
+     means "on turn"/"selected," so "this is my own card" (PlayerSummary/
+     LobbyScreen's is-me ring) needs its own color or the two signals would
+     look identical whenever a player who isn't you is on turn. */
+  --self: #2f6fed;
+  --self-bg: rgba(47, 111, 237, 0.12);
+  --self-border: rgba(47, 111, 237, 0.5);
   --muted-text: #8b8591;
   /* A clearly-visible neutral border for interactive elements (plain
      buttons, inputs) — --border alone is too faint once the element it
@@ -35,14 +45,25 @@
   --space-5: 28px;
   --space-6: 40px;
 
-  --radius-sm: 6px;
+  --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 999px;
 
-  --font-sm: 0.85rem;
-  --font-base: 1rem;
-  --font-lg: 1.15rem;
-  --font-xl: 1.4rem;
+  /* Bumped from Stage 4's 0.85/1/1.15/1.4rem — the "bold music-app" pass
+     wants noticeably bigger, more confident type throughout, plus a new
+     2xl step for the song card's big central year (its one visual anchor,
+     styled after the physical Hitster card's own oversized year). */
+  --font-sm: 0.9rem;
+  --font-base: 1.05rem;
+  --font-lg: 1.25rem;
+  --font-xl: 1.5rem;
+  --font-2xl: 2.25rem;
+
+  /* A heavier, more colorful-feeling elevation than --shadow, for elements
+     meant to visually pop off the page as distinct physical objects — the
+     song card and the sticky header — rather than sit flat like a .card. */
+  --shadow-lg:
+    rgba(0, 0, 0, 0.18) 0 20px 40px -12px, rgba(0, 0, 0, 0.12) 0 8px 16px -4px;
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
@@ -65,9 +86,14 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* --bg deepened from #16171d toward a richer near-black — the "bold
+       music-app" (Spotify/Apple-Music-esque) direction reads better with
+       more contrast between background and surface than the original
+       Stage 4 palette had. --surface (card backgrounds) is intentionally
+       left as-is so cards still visibly lift off this darker background. */
     --text: #9ca3af;
     --text-h: #f3f4f6;
-    --bg: #16171d;
+    --bg: #101014;
     --border: #2e303a;
     --code-bg: #1f2028;
     --accent: #c084fc;
@@ -76,15 +102,23 @@
     --social-bg: rgba(47, 48, 58, 0.5);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+    --shadow-lg:
+      rgba(0, 0, 0, 0.55) 0 24px 48px -12px, rgba(0, 0, 0, 0.35) 0 10px 20px -6px;
 
     --surface: #1c1d25;
     --surface-2: var(--code-bg);
     --success: #4ade80;
+    --success-bg: rgba(74, 222, 128, 0.15);
+    --success-border: rgba(74, 222, 128, 0.5);
     --danger: #f87171;
     --danger-bg: rgba(248, 113, 113, 0.15);
+    --danger-border: rgba(248, 113, 113, 0.5);
     --warning: #facc15;
     --warning-bg: rgba(250, 204, 21, 0.15);
     --warning-border: rgba(250, 204, 21, 0.5);
+    --self: #7fa8ff;
+    --self-bg: rgba(127, 168, 255, 0.18);
+    --self-border: rgba(127, 168, 255, 0.5);
     /* Lightened from #6b7280 — that value was too close in luminance to
        --surface/--surface-2/--code-bg (all ~#1c1d25-#1f2028), so muted
        text (the divider, badge-muted, a timeline list inside a
@@ -144,70 +178,250 @@ p {
   margin: 0;
 }
 
-/* SlotPicker's row of gap buttons (GameBoard.tsx) — a horizontally
-   scrolling row of pills rather than a wrapping block list, so a timeline
-   with many cards stays a single tappable row on a phone instead of
-   growing tall and pushing the rest of the board down. See the "General
-   overflow rule" in the Stage 4 plan: this is the timeline's own
-   scrollable region. */
-.slot-picker {
+/* SongCard (SongCard.tsx) — the "physical paper card" look: one panel,
+   three stacked rows (artist / big year / title), styled to visually read
+   as a distinct object rather than a flat .card panel. Deliberately its
+   own surface treatment (--shadow-lg, a heavier border) instead of reusing
+   .card, so a row of these genuinely looks like cards sitting on a table. */
+.song-card {
   display: flex;
-  gap: var(--space-2);
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-3);
+  text-align: center;
+  box-sizing: border-box;
+  /* A safety net, not the primary truncation mechanism (that's
+     .song-card-title's line-clamp and .song-card-artist's ellipsis
+     below) — nothing should ever visually spill past the fixed box a
+     size variant defines. */
+  overflow: hidden;
+}
+/* Real fixed width + height (not just min-width) per variant — every
+   card in a row shares the same proportions regardless of content
+   length, and .song-card-title's line-clamp/.song-card-artist's ellipsis
+   below have an actual box to wrap/truncate within instead of an
+   open-ended one, which is what made a long artist name or title able to
+   balloon one card wider/taller than its neighbors, with unpredictable
+   text wrapping. */
+.song-card-sm {
+  width: 150px;
+  height: 148px;
+  padding: var(--space-2);
+}
+.song-card-md {
+  width: 190px;
+  height: 205px;
+}
+.song-card-lg {
+  width: 240px;
+  height: 222px;
+  padding: var(--space-4);
+}
+.song-card-artist {
+  /* width, not just max-width: .song-card's align-items: center means a
+     child otherwise only sizes to its own content (shrink-to-fit), so
+     max-width alone is a ceiling that's never actually reached — without
+     a real, definite width, ellipsis/line-clamp truncation is unreliable. */
+  width: 100%;
+  /* Smaller than --font-sm (the smallest named step in the scale) and
+     2-line clamped like .song-card-title below, rather than a single
+     ellipsis-truncated line — a full band name (e.g. "Red Hot Chili
+     Peppers") has as much right to actually be readable as a title does. */
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.song-card-year {
+  font-size: var(--font-2xl);
+  font-weight: 800;
+  color: var(--text-h);
+  line-height: 1.1;
+}
+.song-card-sm .song-card-year {
+  font-size: var(--font-xl);
+}
+.song-card-title {
+  /* Same reasoning as .song-card-artist above: a real width, not just a
+     max-width, is what makes -webkit-line-clamp wrap reliably at all —
+     without it, a long title could wrap into many narrow lines that
+     overflow past the card's fixed height instead of clamping to 2. */
+  width: 100%;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text);
+  /* 2-line clamp: a long title/id gets cut off with an ellipsis rather
+     than growing the card or overflowing it. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.song-card-footer {
+  margin-top: 2px;
+  font-size: var(--font-sm);
+  color: var(--muted-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Correctness color-coding (requirement 1 + the tie-year bug fix, §4) —
+   a colored ring on top of the card's own shadow, using the same
+   success/danger tokens as .blob-success/.blob-danger below. */
+.song-card-correct {
+  border-color: var(--success-border);
+  box-shadow: var(--shadow-lg), 0 0 0 3px var(--success-bg);
+}
+.song-card-incorrect {
+  border-color: var(--danger-border);
+  box-shadow: var(--shadow-lg), 0 0 0 3px var(--danger-bg);
+}
+
+/* SongTimeline (SongTimeline.tsx, replacing the old SlotPicker/.slot-*
+   classes) — a horizontally-scrolling row alternating song cards and
+   "gaps." Each gap is a real, always-tappable <button> (not a hover-only
+   overlay): the exact same onClick path handles a phone tap and a mouse
+   click, so there is only one interaction to reason about. Hovering (or
+   focusing, for keyboard users) is a pure CSS enhancement layered on top —
+   it simply never matches on touch, no JS branching needed either way. */
+.timeline-strip {
+  display: flex;
+  align-items: stretch;
   overflow-x: auto;
-  padding: var(--space-2) 2px;
+  padding: var(--space-2) 2px var(--space-3);
   -webkit-overflow-scrolling: touch;
 }
-
-.slot {
+.timeline-gap {
+  position: relative;
   flex: 0 0 auto;
-  min-height: 44px;
-  white-space: normal;
-  max-width: 220px;
-  text-align: left;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  /* --border-strong (not --border) and --text-h (not --text) — same fix
-     as .btn: a clickable slot needs a border/text strong enough to read
-     as tappable, not the same faint look a claimed/disabled one gets. */
-  border: 1px solid var(--border-strong);
-  background: var(--surface-2);
-  color: var(--text-h);
+  width: 24px;
+  min-height: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  background: none;
+  border: none;
+  padding: 0;
   font: inherit;
-  font-size: var(--font-sm);
   cursor: pointer;
 }
-
-/* Genuinely non-interactive (claimed, or the whole board is a read-only
-   "watching" view with no onSelect at all) — dimmed so it visually reads
-   as "look, don't touch," distinct from the full-strength look above. */
-.slot:disabled {
+/* Extends the actual hoverable/clickable area sideways into the
+   neighboring cards' space, without affecting flex layout (so the
+   visible 24px spacing between cards is unchanged) and without any JS —
+   a pseudo-element is part of its host's box for pointer-event purposes,
+   so hovering/clicking here still counts as hovering/clicking the gap
+   button itself. ±16px stays well within half a timeline card's own
+   width, so adjacent gaps' extended zones don't meaningfully collide. */
+.timeline-gap::before {
+  content: "";
+  position: absolute;
+  inset: 0 -16px;
+}
+.timeline-gap:disabled {
   cursor: default;
-  opacity: 0.6;
 }
-
-/* The slot a player has currently picked (but not yet confirmed/attempted)
-   in PlacementPanel/StealPanel — see GameBoard.tsx's SlotPicker, which
-   already applies this class. Uses the same --accent tokens the rest of
-   the theme already defines for both light and dark mode, so this needs
-   no theme-specific rule of its own. */
-.slot-selected {
-  border: 2px solid var(--accent);
-  background: var(--accent-bg);
-  color: var(--text-h);
-  font-weight: 600;
+.timeline-marker {
+  width: 3px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  background: var(--border-strong);
+  transition:
+    background-color 0.15s ease,
+    width 0.15s ease,
+    box-shadow 0.15s ease;
 }
-
-/* A slot someone (the active player's own placement, or another player's
-   steal attempt) already claimed this round — still fully visible/labeled
-   (open-card game), just not pickable by anyone else. Deliberately a
-   neutral gray, not --accent, so it reads as "unavailable" rather than
-   "selected." */
-.slot-claimed {
-  border: 1px solid var(--border);
-  background: var(--code-bg);
-  color: var(--text);
-  opacity: 0.6;
+.timeline-gap:hover:not(:disabled) .timeline-marker,
+.timeline-gap:focus-visible .timeline-marker,
+.timeline-gap-selected .timeline-marker {
+  background: var(--accent);
+  width: 5px;
+  box-shadow: 0 0 0 6px var(--accent-bg);
+}
+/* A gap someone already claimed this round (the active player's own
+   placement, or another voter's steal attempt) — still visible/labeled
+   (open-card game), just not pickable by anyone else. */
+.timeline-gap-claimed {
   cursor: not-allowed;
+}
+.timeline-gap-claimed .timeline-marker {
+  background: var(--border);
+  opacity: 0.7;
+}
+/* Deliberately NOT sized to fit inside the 24px gap column — a name has
+   no business trying to cram into that width. Floats as a wider tag that
+   overlaps the neighboring card(s) when it needs to (harmless: those
+   cards aren't interactive, and the slot is already claimed). Stays
+   within .timeline-gap's own min-height rather than escaping above the
+   row entirely — .timeline-strip's overflow-x: auto also computes
+   overflow-y away from visible, so anything positioned outside the
+   strip's own box would get clipped by scrolling, not just by siblings.
+   .timeline-gap being a positioned element (see ::before above) is what
+   makes this paint above the plain, non-positioned SongCard siblings
+   automatically, so the tag is never covered regardless of card width. */
+.timeline-gap-label {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 2px 8px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-h);
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 1;
+}
+/* The first/last gap only has a neighboring card on one side — centering
+   the label (as every other gap does) would push half of it past the
+   start/end of .timeline-strip's own scrollable content, where it gets
+   clipped rather than just scrolled to (overflow-x: auto can't scroll
+   backward past the content's start). Anchoring to the gap's own edge
+   instead keeps the label entirely within the one card it actually
+   overlaps. Relies on SongTimeline.tsx's render order — Fragments don't
+   add wrapper nodes, so .timeline-strip's actual first/last DOM children
+   are always the first/last gap buttons. */
+.timeline-gap:first-child .timeline-gap-label {
+  left: 0;
+  transform: none;
+}
+.timeline-gap:last-child .timeline-gap-label {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+/* Post-reveal only: highlights every gap within the tie-aware correct
+   range (see protocol.ts's correctPositionRange) directly on the board,
+   so the bug fix's "both sides of a tie are correct" is visible, not just
+   describable in text. */
+.timeline-gap-success .timeline-marker {
+  background: var(--success);
+  box-shadow: 0 0 0 6px var(--success-bg);
+}
+.timeline-gap-danger .timeline-marker {
+  background: var(--danger);
+  box-shadow: 0 0 0 6px var(--danger-bg);
 }
 
 code,
@@ -245,6 +459,85 @@ code {
   box-sizing: border-box;
 }
 
+/* RevealPanel's hero moment — the revealed SongCard next to its color-coded
+   outcome blob. Wraps to a stacked column on narrow phones rather than
+   squeezing both side by side. */
+.reveal-hero {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.reveal-hero .blob {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* AppHeader.tsx — a slim, persistent bar instead of the page's old static
+   <h1>, plus each screen's own duplicated "Room {code}"/"You are X"/
+   "Leave room" lines. Sticky so the room code and leave action stay
+   reachable without scrolling back up on a long game-board screen —
+   exactly the "reorganize so it's easier to navigate" ask, without
+   introducing tabs/routing. */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  min-height: 56px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+.app-header-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 800;
+  font-size: var(--font-lg);
+  color: var(--text-h);
+  white-space: nowrap;
+}
+.app-header-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex: 1;
+  min-width: 0;
+}
+/* Plain text here (the original version) blended straight into the header
+   background — this needs to visibly "pop" since it's the one thing a
+   player has to read aloud to friends. A colored pill (same accent tokens
+   as .blob-info) plus an explicit "Room code:" label does that. */
+.app-header-room {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  padding: 4px var(--space-3);
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: var(--font-lg);
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+.app-header-room-label {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: var(--font-lg);
+  letter-spacing: normal;
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
 /* Generic vertical rhythm for a screen's top-level children — used instead
    of bespoke margins on every heading/paragraph/button. */
 .stack {
@@ -277,26 +570,62 @@ code {
   margin-top: 0;
 }
 
-/* A prominent "what do I do right now" banner (GameBoard's myStatusLine) —
-   deliberately the most visually loud thing on a phone screen, since
-   that's the one line a player actually needs to read every time. */
-.status-banner {
+/* The color-coded "blob" panel system — every piece of info/status text in
+   the app (the "what do I do right now" line, the reveal outcome, form
+   errors) renders as one of these instead of always being the same flat
+   color. .blob-info reuses --accent rather than a 5th hue: it's already
+   the app's one brand color (also used for "your turn"/selection), and a
+   5-color palette for 4 real meanings (info/success/danger/warning) would
+   be a color with no distinct job. */
+.blob {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   text-align: left;
-  background: var(--accent-bg);
-  border: 1px solid var(--accent-border);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
   font-size: var(--font-lg);
   font-weight: 600;
+}
+.blob-info {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
   color: var(--text-h);
 }
+.blob-success {
+  background: var(--success-bg);
+  border: 1px solid var(--success-border);
+  color: var(--success);
+}
+.blob-danger {
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+}
+.blob-warning {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning);
+}
+/* A quieter size for secondary/inline notices (form errors) that
+   shouldn't compete with the one big per-screen status blob above. */
+.blob-sm {
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-base);
+}
 
+/* A flat bordered rectangle at this height/radius otherwise reads almost
+   identically to .field input right next to it (see "Join room" sitting
+   under a room-code field) — the bottom "ledge" shadow plus the
+   hover/press feedback below are what actually signal "this is a button,"
+   not just a filled-in box. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  min-height: 44px;
+  min-height: 48px;
   padding: 0 var(--space-4);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
@@ -305,10 +634,26 @@ code {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.12);
+  transition:
+    filter 0.15s ease,
+    box-shadow 0.1s ease,
+    transform 0.1s ease,
+    border-color 0.15s ease;
+}
+.btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--accent-border);
+}
+.btn:active:not(:disabled) {
+  filter: brightness(0.96);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0.12);
+  transform: translateY(2px);
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .btn-primary {
   border-color: var(--accent-border);
@@ -317,6 +662,10 @@ code {
 }
 .btn-outline {
   background: transparent;
+  box-shadow: none;
+}
+.btn-outline:active:not(:disabled) {
+  transform: none;
 }
 /* For an action that costs something and might fail (attempting a
    steal) — visually distinct from .btn-primary's "safe, forward
@@ -326,6 +675,14 @@ code {
   background: var(--warning-bg);
   color: var(--warning);
 }
+/* For claiming something earned/deserved (the bonus-token self-judgment's
+   "Yes" button) — distinct from .btn-primary's neutral "forward progress"
+   purple, so getting a reward visually reads as a positive outcome. */
+.btn-success {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+  color: var(--success);
+}
 /* For an action that leaves/exits something — never destructive to game
    state (rooms just sit in memory either way), but still a "step back,"
    so it reads differently from every forward-progress button. */
@@ -333,6 +690,10 @@ code {
   background: transparent;
   border-color: var(--danger);
   color: var(--danger);
+  box-shadow: none;
+}
+.btn-danger-outline:active:not(:disabled) {
+  transform: none;
 }
 /* Stacked, full-width, easy-to-tap buttons on a phone; back to
    inline-sized once there's room for them side by side. */
@@ -355,7 +716,7 @@ code {
   text-align: left;
 }
 .field input {
-  min-height: 44px;
+  min-height: 48px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
@@ -368,16 +729,6 @@ code {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-bg);
-}
-
-.alert {
-  text-align: left;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--danger);
-  background: var(--danger-bg);
-  color: var(--danger);
-  padding: var(--space-2) var(--space-3);
-  font-weight: 600;
 }
 
 .badge {
@@ -406,6 +757,21 @@ code {
 .badge-token {
   background: var(--warning-bg);
   color: var(--warning);
+}
+.badge-success {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+.badge-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+}
+.badge-warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid var(--warning-border);
 }
 
 .divider {
@@ -467,6 +833,18 @@ code {
   border-color: var(--accent-border);
   box-shadow: 0 0 0 2px var(--accent-bg);
 }
+/* "This is my own card" — independent of whose turn it is, so a player
+   isn't just plain/gray on every turn but their own. */
+.player-card.is-me {
+  border-color: var(--self-border);
+  box-shadow: 0 0 0 2px var(--self-bg);
+}
+/* Both apply at once on your own turn — keep the accent ring as the
+   primary "on turn" cue, self-color layered as a second, outer ring
+   rather than overwriting it. */
+.player-card.is-me.is-active {
+  box-shadow: 0 0 0 2px var(--accent-bg), 0 0 0 4px var(--self-bg);
+}
 .player-card-name {
   display: flex;
   align-items: center;
@@ -481,11 +859,17 @@ code {
   margin-top: var(--space-2);
   flex-wrap: wrap;
 }
-.player-card ul {
-  margin: var(--space-2) 0 0;
-  padding-left: 18px;
-  font-size: var(--font-sm);
-  color: var(--muted-text);
+/* A player's open timeline, rendered as a row of (small) SongCards instead
+   of a plain bullet list — kept to a single non-wrapping scrollable row so
+   a long timeline doesn't make the whole scoreboard tile grow tall. */
+.player-card-timeline {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* The activity feed (EventLog.tsx). A <details> element rather than any
