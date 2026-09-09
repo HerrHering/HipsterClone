@@ -7,7 +7,16 @@ export type SongLookup = Record<string, SongManifestEntry>;
 // something readable, using the manifest App.tsx already loaded.
 export function describeSong(songsById: SongLookup, songId: string): string {
   const song = songsById[songId];
-  return song ? `${song.title} — ${song.artist} (${song.year})` : songId;
+  return song ? `${song.title} — ${song.artist} (${song.year})` : `${songId} — unknown song details`;
+}
+
+export function describeTimelineGap(timeline: TimelineCard[], position: number): string {
+  const before = timeline[position - 1];
+  const after = timeline[position];
+  if (!before && !after) return "Start timeline";
+  if (!before) return `Before ${after!.year}`;
+  if (!after) return `After ${before.year}`;
+  return `Between ${before.year} and ${after.year}`;
 }
 
 // The accessible name for "insertion slot" number `position` in `timeline`

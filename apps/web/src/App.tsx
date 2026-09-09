@@ -32,6 +32,7 @@ interface Seat {
 
 const SEAT_STORAGE_KEY = "hipster-seat";
 const NAME_STORAGE_KEY = "hipster-name";
+const MUTE_STORAGE_KEY = "hipster-muted";
 
 // Unlike the seat, a stored name is never removed — there's no "clear your
 // name" action, it should just keep coming back pre-filled the next time
@@ -78,6 +79,9 @@ function App() {
   const [storedName] = useState<string>(() => loadStoredName());
   const [homePending, setHomePending] = useState(false);
   const [homeError, setHomeError] = useState<string | null>(null);
+  const [muted, setMuted] = useState(() => safeLocalStorageGet(MUTE_STORAGE_KEY) === "1");
+
+  useEffect(() => safeLocalStorageSet(MUTE_STORAGE_KEY, muted ? "1" : "0"), [muted]);
 
   useEffect(() => {
     // STATIC FILE, not an api request — this hits apps/web/public/manifest.json
@@ -189,6 +193,8 @@ function App() {
         roomCode={seat?.roomCode}
         turnLabel={turnLabel}
         onLeave={seat ? leaveRoom : undefined}
+        muted={muted}
+        onToggleMute={seat ? () => setMuted((value) => !value) : undefined}
       />
 
       <div className="app-shell">
@@ -248,10 +254,12 @@ function App() {
                   />
                 ) : (
                   <GameBoard
+                    key={gameState.phase.type === "gameOver" ? "game-over" : gameState.phase.songId}
                     playerId={seat.playerId}
                     state={gameState}
                     songsById={manifestState.songsById}
                     onAction={handleAction}
+                    muted={muted}
                   />
                 )}
               </div>
