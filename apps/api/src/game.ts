@@ -226,6 +226,18 @@ function insertCard(
   position: number,
 ): void {
   player.timeline.splice(position, 0, { songId, year });
+  // `position` is only guaranteed meaningful when it was computed against
+  // *this* player's own timeline (the active player's own correct
+  // placement) — a steal's position was computed against the *active*
+  // player's timeline instead (see StealPanel's comment), so reusing it
+  // directly here can splice into the wrong spot for the stealer's own
+  // timeline. Array.prototype.sort has been a stable sort since ES2019, so
+  // this doesn't disturb tie-breaking: cards that already share a year keep
+  // whatever relative order they were just spliced into, preserving the
+  // "lands exactly where the winning guesser pointed" behavior `position`
+  // exists for in the active-player case (there, the splice was already at
+  // a valid spot, so this sort is a no-op).
+  player.timeline.sort((a, b) => a.year - b.year);
 }
 
 // True once every player *other* than the active one has cast a vote
