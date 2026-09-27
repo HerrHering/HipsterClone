@@ -51,6 +51,15 @@ newgrp docker   # picks up the group in this shell without logging out
 ## 4. Build and start the server
 
 ```bash
+# One-time: make the container run as *you*, not root — otherwise every
+# song it downloads into apps/api/data/cache/ ends up root-owned on this
+# machine, which then blocks a plain (non-Docker) `npm run dev` from ever
+# writing to that same folder again. mkdir first so Docker bind-mounts your
+# already-correctly-owned directory instead of auto-creating a root-owned
+# one on first run.
+mkdir -p apps/api/data/cache
+printf "HIPSTER_UID=%s\nHIPSTER_GID=%s\n" "$(id -u)" "$(id -g)" > .env
+
 docker compose up -d --build
 ```
 Verify:
@@ -84,6 +93,11 @@ Send that URL to your friends. No Tailscale install or account needed on their e
 - **Every song download fails inside the container, even though it worked locally** — check `docker-compose.yml`'s cookies volume is **not** mounted `:ro`. `yt-dlp` rewrites its cookie jar on every run; a read-only mount makes that crash, and every download looks like a failure.
 - **`docker compose up --build` fails early / `manifest.json` missing inside the image** — you skipped step 1's `npm run scrape`, or didn't copy the file over in step 2.
 - **After a while, downloads start failing with a bot-check error** — cookies expired; redo step 1's export and copy the new `cookies.txt` over, then `docker compose up -d --build`.
+- **A local (non-Docker) `npm run dev` on this same machine suddenly can't download any *new* song** (`EACCES: permission denied` in its logs), even though already-cached songs still play fine — `apps/api/data/` got left root-owned by an older Docker run from before step 4's `.env` fix existed. One-time repair:
+  ```bash
+  sudo chown -R "$(id -u):$(id -g)" apps/api/data
+  ```
+  Then redo step 4's `.env` file (if missing) and `docker compose up -d --build` so this doesn't happen again.
 
 ## 6. Day-to-day
 

@@ -194,4 +194,11 @@ export type GameAction =
   | { type: "NEXT_TURN" }
   | { type: "PLAY" }
   | { type: "PAUSE" }
-  | { type: "SEEK"; positionSec: number };
+  | { type: "SEEK"; positionSec: number }
+  // Only the active player, and only while phase is "playingSong" — i.e.
+  // before they've confirmed their own placement (that transitions phase to
+  // "stealWindow", closing this window automatically). Unconditional: no
+  // cost, no limit, for when a song's audio is broken/corrupted. Discards
+  // the current song and loads a fresh one for the same player's same turn
+  // — see loadNextSong in game.ts, reused as-is.
+  | { type: "SKIP_SONG" };

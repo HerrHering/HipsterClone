@@ -880,6 +880,16 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                   <span>{audioStatus === "loading" ? "Loading song…" : "Buffering…"}</span>
                 )
               )}
+              <br />
+              {/* Unconditional, unlimited — for a broken/corrupted song's
+                  audio. Only reachable while phase is still "playingSong":
+                  CONFIRM_PLACEMENT moves phase to "stealWindow" the instant
+                  this player places their card, which closes this window
+                  automatically (see SKIP_SONG's guard in game.ts) — no
+                  separate "already placed" check needed here either. */}
+              <button className="btn btn-outline" onClick={() => act({ type: "SKIP_SONG" })}>
+                Skip song
+              </button>
             </>
           ) : (
             // Everyone else: the real, invisible, "dumb follower" element

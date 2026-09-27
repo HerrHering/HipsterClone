@@ -12,6 +12,10 @@ apps/api/data/cache/
 # credential, never committed (see the Stage 5 deploy runbook)
 cookies.txt
 
+# host-specific UID/GID for docker-compose.yml's `user:` override — see
+# HOSTING.md. Never shared between machines.
+.env
+
 # editor/OS
 .vscode/*
 !.vscode/extensions.json

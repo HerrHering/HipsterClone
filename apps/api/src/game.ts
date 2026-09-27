@@ -474,6 +474,22 @@ export async function applyAction(
       break;
     }
 
+    case "SKIP_SONG": {
+      // Same window as CONFIRM_PLACEMENT — once the active player places
+      // their card, phase moves to "stealWindow" and this guard alone
+      // closes the window, no separate "already placed" check needed.
+      if (phase.type !== "playingSong") {
+        throw new Error(`can't skip a song during "${phase.type}"`);
+      }
+      if (playerId !== activeId) {
+        throw new Error("only the active player can skip the song");
+      }
+      pushLog(state, `${requirePlayer(state, playerId).name} skipped a song.`);
+      const catalog = (await loadManifest()).songs;
+      loadNextSong(state, catalog);
+      break;
+    }
+
     case "STEAL_ATTEMPT": {
       if (phase.type !== "stealWindow") {
         throw new Error(`can't attempt a steal during "${phase.type}"`);
