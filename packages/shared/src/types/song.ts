@@ -22,6 +22,15 @@ export interface SongManifestEntry {
   title: string;
   artist: string;
   year: number;
+  /**
+   * Whether this song's source CSV (see tools/scraper/data/) is currently
+   * named `active_*.csv` rather than `inactive_*.csv`. Inactive entries stay
+   * in the manifest — their resolved audio.videoId etc. is preserved — but
+   * apps/api's loadManifest() filters them out, so they're never picked for
+   * play. Toggle a whole collection by renaming its CSV file and rerunning
+   * the scraper.
+   */
+  active: boolean;
   audio: SongAudioRef;
 }
 

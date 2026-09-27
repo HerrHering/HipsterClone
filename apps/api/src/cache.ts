@@ -18,9 +18,15 @@ const DEBUG = process.env.HIPSTER_DEBUG === "1";
 
 const MP3_SUFFIX = ".mp3";
 
+// Filters out inactive songs (see SongManifestEntry.active) so every caller —
+// game.ts's pickers, findSong/ensureCached below — transparently only ever
+// sees playable songs, without needing to filter themselves. Safe under the
+// assumption the manifest doesn't change mid-game: any id already in play was
+// drawn from this same active-only view when it was first selected.
 export async function loadManifest(): Promise<SongManifest> {
   const text = await readFile(manifestPath, "utf-8");
-  return JSON.parse(text) as SongManifest;
+  const manifest = JSON.parse(text) as SongManifest;
+  return { ...manifest, songs: manifest.songs.filter((song) => song.active) };
 }
 
 export async function findSong(

@@ -57,8 +57,8 @@ One command, covers all four workspaces.
 ```bash
 npm run scrape
 ```
-Resolves `tools/scraper/data/songs.csv` (already tracked in git) into `apps/web/public/manifest.json`. Search-only — **no cookies needed** for this step.
-Edit `songs.csv` to add or remove songs by hand!
+Resolves every `tools/scraper/data/active_*.csv` file (already tracked in git) into `apps/web/public/manifest.json`. Search-only — **no cookies needed** for this step.
+Edit `active_songs.csv` to add or remove songs by hand! See **[Song lists](#song-lists-turning-a-collection-on-or-off)** below for the full active/inactive convention.
 
 ## 6. Run it
 
@@ -95,12 +95,34 @@ Open `http://localhost:5173`. `apps/web` (`:5173`) and `apps/api` (`:5174`) both
 ## Day-to-day: adding a song
 
 ```bash
-# 1. add a row to tools/scraper/data/songs.csv: artist,title,year (all three, required)
+# 1. add a row to any tools/scraper/data/active_*.csv: artist,title,year (all three, required)
 # 2. re-resolve (only new rows are searched):
 npm run scrape
 # 3. if a match is wrong, hand-edit that song's videoId directly in apps/web/public/manifest.json
 #    — it sticks across future scrapes as long as artist/title/year don't change
 ```
+
+## Song lists: turning a collection on or off
+
+Song lists live in `tools/scraper/data/`, one CSV per collection, each named `active_<name>.csv` or `inactive_<name>.csv` — the prefix decides whether its songs are playable.
+
+```bash
+# add a whole new collection:
+#   tools/scraper/data/active_80s_hits.csv   (artist,title,year header, same as active_songs.csv)
+npm run scrape
+
+# turn a collection off (its songs stop being picked, but stay in manifest.json):
+mv tools/scraper/data/active_80s_hits.csv tools/scraper/data/inactive_80s_hits.csv
+npm run scrape
+
+# turn it back on later — instant, no re-resolving:
+mv tools/scraper/data/inactive_80s_hits.csv tools/scraper/data/active_80s_hits.csv
+npm run scrape
+```
+- Only `active_*.csv` files are ever read by the scraper. An `inactive_*.csv`'s songs are resolved lazily — nothing happens to them until the file is renamed to `active_` and rescraped.
+- Deactivating is cheap either way: song ids are derived from `artist-title-year`, not the filename, so a rename never triggers a re-search — the scraper just flips that song's `active` flag in `manifest.json` and reuses its already-resolved YouTube link.
+- Once a song has ever been active, it stays in `manifest.json` forever (flagged `active: false` when its list is off) instead of being deleted — this is what makes reactivating instant. To truly remove a song forever, hand-delete its entry from `manifest.json` directly, same as the videoId-override workflow above.
+- `apps/api` only ever picks/plays `active: true` songs; a room already in progress isn't affected by a rescrape — start a new room to pick up a list you just toggled.
 
 ## Debugging
 
@@ -131,7 +153,7 @@ apps/
     dist/                # generated — git-ignored
 packages/shared/       # shared TS types
 tools/scraper/
-  data/songs.csv       # the catalog you hand-edit
+  data/active_*.csv, inactive_*.csv  # song collections you hand-edit — see "Song lists" below
 node_modules/          # generated (step 4) — git-ignored, platform-specific
 .venv/                 # generated (step 3) — git-ignored, platform-specific
 cookies.txt            # hosting only, not dev — git-ignored, see HOSTING.md
