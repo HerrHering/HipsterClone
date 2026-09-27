@@ -435,26 +435,28 @@ function PlayerSummary({
           }
           return (
             <div key={player.id} className={cardClasses.join(" ")}>
-              <div className="player-card-name">
-                <strong>{player.name}</strong>
-                {player.id === state.hostId && (
-                  <span className="badge" title="Room host">
-                    <IconCrown size={12} /> Host
+              <div className="player-card-header">
+                <div className="player-card-name">
+                  <strong>{player.name}</strong>
+                  {player.id === state.hostId && (
+                    <span className="badge" title="Room host">
+                      <IconCrown size={12} /> Host
+                    </span>
+                  )}
+                  {player.id === viewerId && <span className="badge badge-muted">You</span>}
+                  {player.id === highlightId && (
+                    <span className="badge badge-accent">On turn</span>
+                  )}
+                  {voteStatus && <span className="badge badge-muted">{voteStatus}</span>}
+                </div>
+                <div className="player-card-counts">
+                  <span className="badge">
+                    {player.timeline.length} card{player.timeline.length === 1 ? "" : "s"}
                   </span>
-                )}
-                {player.id === viewerId && <span className="badge badge-muted">You</span>}
-                {player.id === highlightId && (
-                  <span className="badge badge-accent">On turn</span>
-                )}
-                {voteStatus && <span className="badge badge-muted">{voteStatus}</span>}
-              </div>
-              <div className="player-card-counts">
-                <span className="badge">
-                  {player.timeline.length} card{player.timeline.length === 1 ? "" : "s"}
-                </span>
-                <span className="badge badge-token">
-                  <IconCoin size={12} /> {player.tokens} token{player.tokens === 1 ? "" : "s"}
-                </span>
+                  <span className="badge badge-token">
+                    <IconCoin size={12} /> {player.tokens} token{player.tokens === 1 ? "" : "s"}
+                  </span>
+                </div>
               </div>
               <div className="player-card-timeline">
                 {player.timeline.map((card) => (
@@ -771,6 +773,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
             // up, handled explicitly below via `locked`.
             <>
               <audio
+                className="audio-player"
                 controls
                 src={audioSrc(state.playback.songId)}
                 preload="auto"
@@ -889,6 +892,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
             // there's no way to interact with it at all.
             <>
               <audio
+                className="audio-player"
                 ref={audioRef}
                 src={audioSrc(state.playback.songId)}
                 muted={muted}
@@ -921,6 +925,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                 }
               />
               <audio
+                className="audio-player"
                 ref={visualAudioRef}
                 controls
                 muted

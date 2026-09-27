@@ -780,19 +780,16 @@ code {
   font-size: var(--font-sm);
 }
 
-/* The main-column-plus-sidebar split (board + scoreboard/event log) —
-   single column on a phone, two columns once there's enough width for a
-   320px sidebar to make sense next to the board. */
+/* The main panel (song-picking/reveal/steal + audio player) stacked above
+   the scoreboard/event log — always a single column at every width, so the
+   main panel gets the full page width instead of sharing it with a side
+   column. DOM order (main-column, then side-column) is what places the
+   scoreboard/event log below the main panel. */
 .game-layout {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-4);
   align-items: start;
-}
-@media (min-width: 860px) {
-  .game-layout {
-    grid-template-columns: minmax(0, 1fr) 320px;
-  }
 }
 .main-column,
 .side-column {
@@ -802,25 +799,22 @@ code {
   min-width: 0;
 }
 
-/* The scoreboard (PlayerSummary) — a responsive card grid instead of a
-   plain list. Past a point a phone-width screen can't fit even one
-   comfortably-sized card per row without shrinking text, so beyond a
-   handful of players it becomes its own horizontally-scrolling row
-   instead (the "General overflow rule": scroll it, don't cramp it). */
+/* Stretches an <audio controls> element to fill its card — browsers give it
+   an intrinsic width (~300px) by default that doesn't grow with its
+   container on its own. */
+.audio-player {
+  width: 100%;
+  display: block;
+}
+
+/* The scoreboard (PlayerSummary) — one full-width row per player, stacked
+   top to bottom, rather than a multi-column grid: at full page width a
+   player's name/badges/token count now comfortably fit on one line (see
+   .player-card-header below) instead of needing a narrow, wrapping card. */
 .player-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: 1fr;
   gap: var(--space-3);
-}
-@media (max-width: 480px) {
-  .player-grid {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(200px, 1fr);
-    grid-template-columns: none;
-    overflow-x: auto;
-    padding-bottom: var(--space-2);
-    -webkit-overflow-scrolling: touch;
-  }
 }
 .player-card {
   text-align: left;
@@ -845,6 +839,16 @@ code {
 .player-card.is-me.is-active {
   box-shadow: 0 0 0 2px var(--accent-bg), 0 0 0 4px var(--self-bg);
 }
+/* Name (+ badges) and card/token counts side by side on one line — only
+   practical now that each player card spans the full row width; wraps to
+   two lines gracefully if a name/badge combination is unusually long. */
+.player-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
 .player-card-name {
   display: flex;
   align-items: center;
@@ -856,7 +860,6 @@ code {
 .player-card-counts {
   display: flex;
   gap: var(--space-2);
-  margin-top: var(--space-2);
   flex-wrap: wrap;
 }
 /* A player's open timeline, rendered as a row of (small) SongCards instead
