@@ -76,7 +76,7 @@ export function listCachedIds(): string[] {
 // re-checks the disk cache right when its queued turn comes up, so a second
 // caller for a song the first one just finished simply finds it already
 // there and skips its own download — no per-id bookkeeping needed.
-const DOWNLOAD_COOLDOWN_MS = 10_000;
+const DOWNLOAD_COOLDOWN_MS = 5_000;
 let downloadQueueTail: Promise<void> = Promise.resolve();
 let lastDownloadFinishedAt = 0;
 

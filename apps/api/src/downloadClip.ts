@@ -73,6 +73,17 @@ export async function downloadClip(
       : [];
 
   const args = [
+    // Without this, yt-dlp defaults to picking the single best overall
+    // (video+audio) format, then -x below throws away the video it just
+    // downloaded — wasteful, and for some videos that "best overall" pick is
+    // itag 18, YouTube's legacy progressive 360p format, which is
+    // specifically known to be throttled/dropped by YouTube's web client
+    // partway through a download (confirmed: a real download reproducibly
+    // failed at the exact same byte offset twice in a row). Requesting an
+    // audio-only adaptive stream up front sidesteps that format entirely for
+    // any video that has one, which is effectively all of them.
+    "-f",
+    "bestaudio/best",
     "-x",
     "--audio-format",
     "mp3",
