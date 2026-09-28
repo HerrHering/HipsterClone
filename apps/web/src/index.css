@@ -817,6 +817,14 @@ code {
   gap: var(--space-3);
 }
 .player-card {
+  /* Grid items default to min-width: auto, meaning they refuse to shrink
+     below their content's intrinsic width — without this, a long
+     non-wrapping .player-card-timeline row forces this whole card (and its
+     .player-grid track) wider than the side column, so the row visually
+     pokes out past the panel edge instead of being clipped by its own
+     overflow-x: auto. This is the same fix .side-column already needed one
+     level up, just at the grid-item level instead of the flex-item level. */
+  min-width: 0;
   text-align: left;
   background: var(--surface-2);
   border: 1px solid var(--border);

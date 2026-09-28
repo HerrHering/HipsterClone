@@ -285,15 +285,26 @@ function RevealPanel({
   const slotText = low === high ? `slot ${low}` : `slots ${low}–${high} (a tie)`;
   const outcomeTone = phase.activePlacementCorrect ? "success" : phase.stolenBy ? "warning" : "danger";
 
+  // Always the active player's own timeline — the same reference board
+  // every voter's guess was judged against during the steal window (see
+  // StealPanel's comment above), and the board everyone (including the
+  // active player themselves) has been looking at all round. Switching to
+  // the *winner's* timeline here — which can be a successful stealer, not
+  // the active player — was a real, reported bug: the reveal screen would
+  // suddenly show a different player's deck than the one shown the entire
+  // rest of the turn, before "Next Turn" was ever clicked.
+  //
   // Reconstructs the board as it looked *before* the revealed card was
   // inserted — insertCard (game.ts) already mutated the winner's timeline
   // in place by the time this phase exists, so the just-revealed song is
   // filtered back out to make the original gap positions meaningful again.
-  // Safe because a song can only ever be a live card in exactly one
-  // timeline at a time (pickNextSong's reshuffle excludes any currently-
-  // held song from being redrawn).
-  const winnerId = phase.stolenBy ?? activeId;
-  const winnerTimeline = players[winnerId]!.timeline.filter(
+  // That filter is only ever a real no-op when someone other than the
+  // active player won the card: insertCard never touched the active
+  // player's own timeline in that case, so it can't contain the new song
+  // to begin with. Safe either way because a song can only ever be a live
+  // card in exactly one timeline at a time (pickNextSong's reshuffle
+  // excludes any currently-held song from being redrawn).
+  const activePlayerTimeline = players[activeId]!.timeline.filter(
     (card) => card.songId !== phase.songId,
   );
   const revealClaimedSlots = new Map<number, string>();
@@ -328,7 +339,7 @@ function RevealPanel({
       </div>
 
       <SongTimeline
-        timeline={winnerTimeline}
+        timeline={activePlayerTimeline}
         songsById={songsById}
         claimedSlots={revealClaimedSlots}
         positionTones={positionTones}

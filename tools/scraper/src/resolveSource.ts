@@ -1,7 +1,7 @@
 // Resolves a title+artist to a candidate YouTube video via `yt-dlp` search.
 // The matching logic below follows three stages, read top to bottom:
 //   1. prepare  — normalize/tokenize every field exactly once
-//   2. signals  — five small, independently-justified 0..1 scores
+//   2. signals  — six small, independently-justified 0..1 scores
 //   3. combine  — weight and sum the signals into one ScoreBreakdown
 // See textMatch.ts for the normalize/tokenize/compare primitives this file
 // builds on.
@@ -53,16 +53,34 @@ const SEARCH_RESULT_COUNT = 5;
 const CONFIDENCE_WARN_THRESHOLD = 0.4;
 const PLAUSIBLE_DURATION_RANGE: [number, number] = [60, 900]; // 1–15 minutes
 
-// Scoring weights — the four positive weights sum to 1.0 (a perfect match
+// Scoring weights — the five positive weights sum to 1.0 (a perfect match
 // scores 1), and the non-original penalty is subtracted on top of that, so a
 // title that overlaps well but looks like a cover/live version can still
 // land below a title that overlaps less but looks canonical.
-const TITLE_OVERLAP_WEIGHT = 0.5;
-const ARTIST_MENTIONED_WEIGHT = 0.2;
+//
+// channelMatchesArtist and artistMentionedInTitle used to be one signal
+// (Math.max of the two) — split apart, and weighted very differently, so the
+// uploader actually *being* the artist's own channel outweighs a random
+// reupload that merely credits the artist correctly in its title. A real
+// case that motivated this: a personal-channel reupload titled "Bikini - Adj
+// helyet magad mellett" (so it credits the artist fine) was outscoring the
+// artist's own official "Bikini - Topic" auto-generated channel, purely
+// because the reupload's title happened to overlap the target title more
+// exactly. Splitting the signal fixes this without needing to special-case
+// "Topic" channels or any other specific channel-naming convention.
+const TITLE_OVERLAP_WEIGHT = 0.4;
+const CHANNEL_MATCHES_ARTIST_WEIGHT = 0.25;
+const ARTIST_MENTIONED_IN_TITLE_WEIGHT = 0.05;
 const DURATION_PLAUSIBLE_WEIGHT = 0.15;
 const OFFICIAL_MARKER_WEIGHT = 0.15;
 const NON_ORIGINAL_PENALTY = 0.3;
 
+// This catalog is entirely Hungarian songs, and Hungarian-titled search
+// results routinely use the Hungarian word instead of (or as well as) the
+// English one — "koncert" doesn't contain the substring "concert", so an
+// English-only list lets those slip through entirely. A real case: a video
+// titled "...(25 éves koncert)" tied for the top score because this list
+// didn't recognize it as a live recording.
 const NON_ORIGINAL_KEYWORDS = [
   "cover",
   "live",
@@ -77,7 +95,20 @@ const NON_ORIGINAL_KEYWORDS = [
   "nightcore",
   "sped up",
   "slowed",
+  // Hungarian equivalents.
+  "koncert",
+  "koncerten",
+  "koncertfelvétel",
+  "élő",
+  "élőben",
+  "feldolgozás",
+  "akusztik",
+  "akusztikus",
 ];
+
+// "official" alone misses Hungarian uploads that mark themselves as
+// "hivatalos" (official) instead.
+const OFFICIAL_MARKER_KEYWORDS = ["official", "hivatalos"];
 
 export interface ResolvedSource {
   videoId: string;
@@ -146,39 +177,64 @@ function prepare(
 // comments below are that critical look, not just a description of the code.
 // ---------------------------------------------------------------------------
 
-// Fraction of the target title's significant words that also appear in the
-// candidate's title. The strongest signal available: two videos of
-// completely different songs essentially never share most of their title
-// words, whereas the right video — even with "(Official Video)" tacked on,
-// or the artist name reordered into the title — almost always does.
-// PIPELINE STAGE 2 (signal 1 of 5).
+// Combines two directions of title overlap — recall (what fraction of the
+// target title's words show up in the candidate) and precision (what
+// fraction of the candidate's own words, besides the artist's name, are
+// actually part of the target title) — as their geometric mean, so a
+// candidate needs to do reasonably well on *both* rather than fully
+// compensating a weak one with a strong other.
+//
+// Recall alone is the strongest signal available for "is this roughly the
+// right song": two videos of completely different songs essentially never
+// share most of their title words, whereas the right video — even with
+// "(Official Video)" tacked on, or the artist name reordered into the
+// title — almost always does. But recall alone can't tell "Ki Visz Haza"
+// apart from "Részegen Ki Visz Majd Haza" ("... — drunk version"): every
+// target word still shows up somewhere in the longer title, so a
+// recall-only score treats padding the title with unrelated extra words as
+// free. Precision catches exactly that: the extra "Részegen" isn't part of
+// the target title, so it drags precision down (while a legitimate
+// "Artist - Song" prefix doesn't, since the artist's own name is excluded
+// from the candidate side of the precision check — that's expected,
+// wanted content, not padding).
+// PIPELINE STAGE 2 (signal 1 of 6).
 function titleOverlapSignal(m: PreparedMatch): number {
-  return wordOverlapFraction(m.targetTitleWords, m.candidateTitleWords);
+  const recall = wordOverlapFraction(m.targetTitleWords, m.candidateTitleWords);
+  const candidateWordsExcludingArtist = new Set(
+    [...m.candidateTitleWords].filter((word) => !m.artistWords.has(word)),
+  );
+  const precision = wordOverlapFraction(
+    candidateWordsExcludingArtist,
+    m.targetTitleWords,
+  );
+  return Math.sqrt(recall * precision);
 }
 
-// Fraction of the artist's significant name-words that show up in either the
-// uploading channel's name or the video's own title — e.g. a channel called
-// "queenofficial" or a title like "Queen - Bohemian Rhapsody" both match
-// "queen" here. This used to be a substring check
-// (`channel.includes(artist)`), which is *more* brittle, not less: it
-// demands the artist's name appear as one unbroken run of characters, so it
-// misses a channel handle with the words mashed together oddly or the words
-// in a different order, while gaining nothing a word-overlap fraction
-// doesn't already give — both are really just "how much of the name is
-// present." A fraction also naturally handles multi-word artist names: a
-// channel matching half of "Fleetwood Mac" gets partial credit instead of
-// the boolean's all-or-nothing.
-// PIPELINE STAGE 2 (signal 2 of 5).
-function artistMentionedSignal(m: PreparedMatch): number {
-  // Math.max, not an average: the artist only needs to show up *somewhere*
-  // (channel name OR video title) to count — an official channel with a
-  // generic title, or a fan-uploaded title that credits the artist
-  // properly, should both score this signal at 1, not be penalized for the
-  // other location not mentioning the artist too.
-  return Math.max(
-    wordOverlapFraction(m.artistWords, m.channelWords),
-    wordOverlapFraction(m.artistWords, m.candidateTitleWords),
-  );
+// Fraction of the artist's significant name-words that show up in the
+// uploading channel's own name — e.g. a channel called "queenofficial" or
+// "Queen - Topic" matches "queen" here. This is deliberately its own signal,
+// separate from artistMentionedInTitleSignal below, and weighted far more
+// heavily: the uploader actually *being* the artist's channel is a much
+// stronger authenticity signal than a title merely crediting the artist
+// correctly, which any reupload can do. This used to be folded into one
+// Math.max'd signal with the title check, which meant the two were
+// indistinguishable — a personal-channel reupload with a well-credited title
+// scored identically to the artist's own official channel.
+// PIPELINE STAGE 2 (signal 2 of 6).
+function channelMatchesArtistSignal(m: PreparedMatch): number {
+  return wordOverlapFraction(m.artistWords, m.channelWords);
+}
+
+// Fraction of the artist's significant name-words that show up in the
+// video's own title — e.g. "Bohemian Rhapsody (Queen)" matches "queen" here
+// even when the uploading channel doesn't. Kept as a small, separate signal
+// (see channelMatchesArtistSignal above for why it's not combined with that
+// one): a fan reupload that credits the artist properly is still slightly
+// more trustworthy than one that doesn't, just not nearly as trustworthy as
+// the artist's own channel.
+// PIPELINE STAGE 2 (signal 3 of 6).
+function artistMentionedInTitleSignal(m: PreparedMatch): number {
+  return wordOverlapFraction(m.artistWords, m.candidateTitleWords);
 }
 
 // 1 if the candidate's duration falls inside a plausible studio-track range,
@@ -186,7 +242,7 @@ function artistMentionedSignal(m: PreparedMatch): number {
 // it's a sanity check that catches results title/artist matching alone
 // can't: a 15-second ringtone or a 3-hour "full album" upload can both have
 // a title that matches perfectly, but neither is ever the actual song.
-// PIPELINE STAGE 2 (signal 3 of 5).
+// PIPELINE STAGE 2 (signal 4 of 6).
 function durationPlausibleSignal(m: PreparedMatch): number {
   // Array destructuring: PLAUSIBLE_DURATION_RANGE is `[60, 900]`, so this
   // pulls the first element into `min` and the second into `max` in one line
@@ -195,24 +251,29 @@ function durationPlausibleSignal(m: PreparedMatch): number {
   return m.durationSec >= min && m.durationSec <= max ? 1 : 0;
 }
 
-// 1 if the candidate's title contains the word "official" (as in "Official
-// Video"/"Official Music Video"/"Official Audio"), else 0 — the single most
-// reliable marker an artist/label uses to flag their own canonical upload.
-// This exists because the other signals alone can tie: a real case we hit
-// had the true official upload score identically to two *live performance*
-// clips (a Grammy performance, a talent-show performance) that simply don't
-// contain the word "live" anywhere in their titles, so nonOriginalPenalty
-// below couldn't catch them either. Rather than try to enumerate every
-// possible award-show/venue name — a losing game — this gives the genuinely
-// official upload a real, structural edge instead of relying on it merely
-// tying and happening to sort first.
+// 1 if the candidate's title contains a marker like "official" (as in
+// "Official Video"/"Official Music Video"/"Official Audio") or its Hungarian
+// equivalent "hivatalos", else 0 — the single most reliable marker an
+// artist/label uses to flag their own canonical upload. This exists because
+// the other signals alone can tie: a real case we hit had the true official
+// upload score identically to two *live performance* clips (a Grammy
+// performance, a talent-show performance) that simply don't contain the word
+// "live" anywhere in their titles, so nonOriginalPenalty below couldn't catch
+// them either. Rather than try to enumerate every possible award-show/venue
+// name — a losing game — this gives the genuinely official upload a real,
+// structural edge instead of relying on it merely tying and happening to
+// sort first.
 // Checked against the fully-normalized title, not the stopword-filtered
 // word set used by the other signals — "official" is itself in STOPWORDS
 // (see textMatch.ts) precisely because it's too common to help *title*
 // matching, but that's exactly the word we want to detect here.
-// PIPELINE STAGE 2 (signal 4 of 5).
+// PIPELINE STAGE 2 (signal 5 of 6).
 function officialMarkerSignal(m: PreparedMatch): number {
-  return m.candidateTitleNormalized.includes("official") ? 1 : 0;
+  return OFFICIAL_MARKER_KEYWORDS.some((keyword) =>
+    m.candidateTitleNormalized.includes(keyword),
+  )
+    ? 1
+    : 0;
 }
 
 // A flat penalty (subtracted after weighting, not itself weighted — see
@@ -223,7 +284,7 @@ function officialMarkerSignal(m: PreparedMatch): number {
 // pieces of text" — a lenient/fuzzy match here would risk false positives
 // with no benefit, since the whole point is to catch an exact, deliberate
 // marker word.
-// PIPELINE STAGE 2 (signal 5 of 5 — a penalty, not a positive signal).
+// PIPELINE STAGE 2 (signal 6 of 6 — a penalty, not a positive signal).
 function nonOriginalPenalty(m: PreparedMatch): number {
   // `.some(...)` short-circuits on the first match — this is just "does any
   // keyword from the list appear in the title," expressed without a loop.
@@ -240,14 +301,15 @@ function nonOriginalPenalty(m: PreparedMatch): number {
 // ---------------------------------------------------------------------------
 export interface ScoreBreakdown {
   titleOverlap: number;
-  artistMentioned: number;
+  channelMatchesArtist: number;
+  artistMentionedInTitle: number;
   durationPlausible: number;
   officialMarker: number;
   nonOriginalPenalty: number;
   total: number;
 }
 
-// PIPELINE STAGE 3 (combine): weights + sums the 5 signals into one
+// PIPELINE STAGE 3 (combine): weights + sums the 6 signals into one
 // ScoreBreakdown for a single candidate.
 function scoreCandidate(
   candidate: RawCandidate,
@@ -257,7 +319,8 @@ function scoreCandidate(
   const prepared = prepare(candidate, targetTitle, targetArtist);
 
   const titleOverlap = titleOverlapSignal(prepared);
-  const artistMentioned = artistMentionedSignal(prepared);
+  const channelMatchesArtist = channelMatchesArtistSignal(prepared);
+  const artistMentionedInTitle = artistMentionedInTitleSignal(prepared);
   const durationPlausible = durationPlausibleSignal(prepared);
   const officialMarker = officialMarkerSignal(prepared);
   const penalty = nonOriginalPenalty(prepared);
@@ -265,7 +328,8 @@ function scoreCandidate(
   const total = Math.max(
     0,
     titleOverlap * TITLE_OVERLAP_WEIGHT +
-      artistMentioned * ARTIST_MENTIONED_WEIGHT +
+      channelMatchesArtist * CHANNEL_MATCHES_ARTIST_WEIGHT +
+      artistMentionedInTitle * ARTIST_MENTIONED_IN_TITLE_WEIGHT +
       durationPlausible * DURATION_PLAUSIBLE_WEIGHT +
       officialMarker * OFFICIAL_MARKER_WEIGHT -
       penalty,
@@ -273,12 +337,13 @@ function scoreCandidate(
   // Clamped at 0 — a candidate that overlaps poorly AND looks like a cover
   // shouldn't sort as "worse than a non-existent candidate" (e.g. below a
   // hard search failure), just as the worst real option available. (The top
-  // end doesn't need a symmetric clamp at 1: the four positive weights
+  // end doesn't need a symmetric clamp at 1: the five positive weights
   // already sum to exactly 1.0, so nothing can score above that.)
 
   return {
     titleOverlap,
-    artistMentioned,
+    channelMatchesArtist,
+    artistMentionedInTitle,
     durationPlausible,
     officialMarker,
     nonOriginalPenalty: penalty,
@@ -374,7 +439,8 @@ export async function resolveSource(
     for (const { candidate, breakdown: b } of scored) {
       console.log(
         `  ${candidate.id} "${candidate.title}" ` +
-          `titleOverlap=${b.titleOverlap.toFixed(2)} artistMentioned=${b.artistMentioned.toFixed(2)} ` +
+          `titleOverlap=${b.titleOverlap.toFixed(2)} channelMatchesArtist=${b.channelMatchesArtist.toFixed(2)} ` +
+          `artistMentionedInTitle=${b.artistMentionedInTitle.toFixed(2)} ` +
           `durationPlausible=${b.durationPlausible} officialMarker=${b.officialMarker} ` +
           `nonOriginalPenalty=${b.nonOriginalPenalty} total=${b.total.toFixed(2)}`,
       );
@@ -388,7 +454,8 @@ export async function resolveSource(
     const b = best.breakdown;
     console.warn(
       `resolveSource: low-confidence match for "${title}" by "${artist}" -> "${best.candidate.title}" (${best.candidate.id}). ` +
-        `score breakdown: titleOverlap=${b.titleOverlap.toFixed(2)} artistMentioned=${b.artistMentioned.toFixed(2)} ` +
+        `score breakdown: titleOverlap=${b.titleOverlap.toFixed(2)} channelMatchesArtist=${b.channelMatchesArtist.toFixed(2)} ` +
+        `artistMentionedInTitle=${b.artistMentionedInTitle.toFixed(2)} ` +
         `durationPlausible=${b.durationPlausible} officialMarker=${b.officialMarker} ` +
         `nonOriginalPenalty=${b.nonOriginalPenalty} total=${b.total.toFixed(2)}. ` +
         `Verify manually, or hand-edit this song's audio.videoId directly in manifest.json — it'll stick across future scrapes.`,
