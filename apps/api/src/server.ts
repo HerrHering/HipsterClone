@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GameAction } from "@hipster-clone/shared";
@@ -6,6 +6,45 @@ import { errorMessage } from "@hipster-clone/shared";
 import express from "express";
 import { ensureCached, evictCached, listCachedIds } from "./cache.js";
 import { applyAction, createRoom, getState, joinRoom } from "./game.js";
+
+// Opt-in fail-fast check (`npm run dev:require-cookies` / equivalent) for
+// exactly the failure mode today's whole session was about: a broken/missing
+// cookies.txt otherwise stays silent until a player hits a song that needs a
+// real download, deep into a game. This surfaces it immediately at startup
+// instead, with a clear fix pointed at README/HOSTING.md's cookie-export
+// steps. Off by default — normal `npm run dev`/`start` are untouched, since
+// local dev typically has no YTDLP_COOKIES_FILE at all (it falls back to
+// --cookies-from-browser, see downloadClip.ts).
+if (process.env.REQUIRE_COOKIES === "1") {
+  const cookiesFile = process.env.YTDLP_COOKIES_FILE;
+  if (!cookiesFile) {
+    console.error(
+      "REQUIRE_COOKIES=1 but YTDLP_COOKIES_FILE is not set — refusing to start. " +
+        "Set YTDLP_COOKIES_FILE to your exported cookies.txt path (see README.md/HOSTING.md).",
+    );
+    process.exit(1);
+  }
+  if (!existsSync(cookiesFile)) {
+    console.error(
+      `REQUIRE_COOKIES=1 but "${cookiesFile}" doesn't exist — refusing to start. ` +
+        "Export a fresh cookies.txt (see README.md/HOSTING.md's cookie export steps) before starting.",
+    );
+    process.exit(1);
+  }
+  // yt-dlp itself requires this exact header on a cookies file's first line
+  // (see its own wiki) — checking it here catches an empty/corrupted/
+  // wrong-format file before it ever reaches a real download attempt.
+  const firstLine = readFileSync(cookiesFile, "utf-8").split("\n")[0]?.trim();
+  const validHeaders = ["# HTTP Cookie File", "# Netscape HTTP Cookie File"];
+  if (!firstLine || !validHeaders.includes(firstLine)) {
+    console.error(
+      `REQUIRE_COOKIES=1 but "${cookiesFile}" doesn't look like a valid Netscape cookie file ` +
+        `(expected its first line to be one of: ${validHeaders.map((h) => `"${h}"`).join(", ")}). Refusing to start.`,
+    );
+    process.exit(1);
+  }
+  console.log(`REQUIRE_COOKIES=1: found a valid-looking cookies file at "${cookiesFile}".`);
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 // LOCAL FILESYSTEM PATH — apps/web's built output, only relevant/present

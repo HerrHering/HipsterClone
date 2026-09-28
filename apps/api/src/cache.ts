@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { SongManifest, SongManifestEntry } from "@hipster-clone/shared";
 import { downloadClip } from "./downloadClip.js";
@@ -58,13 +59,26 @@ export function listCachedIds(): string[] {
     .map((name) => name.slice(0, -MP3_SUFFIX.length)); // "id.mp3" -> "id"
 }
 
-// Tracks a download already in progress per id, so two near-simultaneous
-// callers (e.g. the UI's explicit prefetch call and the <audio> element's own
-// request, both firing right after a song is selected) share one yt-dlp run
-// instead of racing to write the same output file twice. Keyed by id,
-// valued by the in-flight Promise itself — a second caller just awaits the
-// same Promise instead of starting a second download.
-const inFlightDownloads = new Map<string, Promise<string | null>>();
+// Real yt-dlp downloads (never cache hits — those return before any of this
+// is touched) are globally serialized and rate-limited, across every song
+// id, so this server can't accidentally hammer YouTube the way an unpaced
+// burst of requests once did and tripped its bot-check. `downloadQueueTail`
+// is a promise chain used purely as a FIFO lock: each new call `.then()`s
+// onto whatever's already queued, so only one yt-dlp process ever runs at a
+// time, in request order. `lastDownloadFinishedAt` is stamped only when a
+// real download settles (success or failure), and the next one waits out
+// however much of the cooldown window remains before it may start.
+//
+// This one chain also replaces what used to be a separate per-id
+// "inFlightDownloads" Map for deduping two concurrent callers wanting the
+// same song (a real case — GameBoard.tsx's non-active-player branch renders
+// two <audio> elements pointing at the same song URL at once): `ensureCached`
+// re-checks the disk cache right when its queued turn comes up, so a second
+// caller for a song the first one just finished simply finds it already
+// there and skips its own download — no per-id bookkeeping needed.
+const DOWNLOAD_COOLDOWN_MS = 10_000;
+let downloadQueueTail: Promise<void> = Promise.resolve();
+let lastDownloadFinishedAt = 0;
 
 /**
  * Ensures a song's audio is on disk, downloading it first if necessary.
@@ -82,37 +96,60 @@ export async function ensureCached(id: string): Promise<string | null> {
     return cachedFilePath(id);
   }
 
-  const inFlight = inFlightDownloads.get(id);
-  if (inFlight) {
-    return inFlight;
-  }
+  const runTurn = async (): Promise<string | null> => {
+    // Re-check now that it's actually this call's turn in the queue —
+    // another queued call for the same id may have already downloaded it
+    // while this one was waiting in line, in which case there's nothing
+    // left to do (see the module comment above `DOWNLOAD_COOLDOWN_MS`).
+    if (isCached(id)) {
+      if (DEBUG) {
+        console.log(`ensureCached debug: cache hit for "${id}" after waiting in queue`);
+      }
+      return cachedFilePath(id);
+    }
 
-  if (DEBUG) {
-    console.log(`ensureCached debug: cache miss for "${id}", downloading...`);
-  }
-
-  // Wrapped in an immediately-invoked async function so the Promise it
-  // produces can be stored in `inFlightDownloads` *before* anything inside
-  // it actually finishes — that's what lets a second caller find and await
-  // it below instead of racing to start their own download.
-  const download = (async () => {
     const song = await findSong(id);
     if (!song) {
       return null;
     }
-    const result = await downloadClip(id, song.audio.videoId, cacheDir);
-    return result?.filePath ?? null;
-  })();
 
-  inFlightDownloads.set(id, download);
-  try {
-    return await download;
-  } finally {
-    // Runs whether the download succeeded or failed — either way, the next
-    // caller for this id should start fresh rather than await a Promise
-    // that's already settled.
-    inFlightDownloads.delete(id);
-  }
+    if (DEBUG) {
+      console.log(`ensureCached debug: cache miss for "${id}", downloading...`);
+    }
+
+    const waitMs = lastDownloadFinishedAt + DOWNLOAD_COOLDOWN_MS - Date.now();
+    if (waitMs > 0) {
+      if (DEBUG) {
+        console.log(`ensureCached debug: cooling down for ${waitMs}ms before "${id}"`);
+      }
+      await delay(waitMs);
+    }
+    try {
+      const result = await downloadClip(id, song.audio.videoId, cacheDir);
+      return result?.filePath ?? null;
+    } finally {
+      // Only stamped for a real download attempt — the cache-hit-after-
+      // waiting case above returns before this point, so it never touched
+      // YouTube and shouldn't consume any of the cooldown window.
+      lastDownloadFinishedAt = Date.now();
+    }
+  };
+
+  // Chain this call onto the tail (waits for whatever's already queued),
+  // then immediately advance the tail to this one's completion — the
+  // `.then(() => {}, () => {})` form swallows any rejection so one failed
+  // download never breaks the chain for whatever's queued after it. No
+  // `await` sits between reading `downloadQueueTail` and reassigning it, so
+  // two requests arriving "at once" can never both read the same stale
+  // tail: JavaScript runs this synchronous stretch to completion before any
+  // other async task gets a turn, so whichever call's turn comes first
+  // always leaves the correct, updated tail for the next one to chain onto.
+  const queued = downloadQueueTail.then(runTurn, runTurn);
+  downloadQueueTail = queued.then(
+    () => undefined,
+    () => undefined,
+  );
+  return queued;
 }
 
 export async function evictCached(id: string): Promise<boolean> {

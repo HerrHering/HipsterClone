@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:require-cookies": "REQUIRE_COOKIES=1 tsx watch src/server.ts",
     "build": "tsc",
     "start": "NODE_ENV=production node dist/server.js"
   },

@@ -10,6 +10,13 @@ services:
       # browser profile to pull YouTube cookies from, so this points at
       # a cookies.txt exported ahead of time (see the deploy runbook).
       YTDLP_COOKIES_FILE: /app/cookies.txt
+      # Docker has no --cookies-from-browser fallback at all (no browser
+      # exists in the container) — a missing/broken cookies.txt here means
+      # every song is silently unplayable. See server.ts's startup check:
+      # unconditional here, unlike the opt-in `dev:require-cookies` script
+      # used for local dev, since there's no legitimate reason to run this
+      # container without a valid cookie file.
+      REQUIRE_COOKIES: "1"
     volumes:
       # Not :ro: yt-dlp's --cookies flag treats this file as a live cookie
       # jar, not just an input — it rewrites it (refreshed/rotated cookies)
