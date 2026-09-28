@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -63,6 +63,23 @@ export async function downloadClip(
   // LOCAL FILESYSTEM PATH — cacheDir is a directory on this machine's disk
   // (apps/api/data/cache); create it if this is the very first download.
   await mkdir(cacheDir, { recursive: true });
+
+  // We're only ever called when nothing valid is cached for this song yet
+  // (ensureCached checks that first), so any `${songId}.*` file already
+  // sitting here is a stale leftover — either a partial/corrupt file from a
+  // previous crashed run, or (within one multi-candidate fallback sequence)
+  // a partial file this same function left behind on an earlier candidate's
+  // failed attempt. yt-dlp's own "already been downloaded" resume logic
+  // would otherwise treat that leftover as complete, skip downloading
+  // entirely, and fail postprocessing on the corrupt file — silently
+  // sabotaging every later candidate too. Clearing it first guarantees each
+  // attempt is a genuine, independent download.
+  const staleFiles = await readdir(cacheDir).catch(() => []);
+  await Promise.all(
+    staleFiles
+      .filter((name) => name.startsWith(`${songId}.`))
+      .map((name) => unlink(resolve(cacheDir, name)).catch(() => {})),
+  );
 
   const cookiesFile = process.env.YTDLP_COOKIES_FILE;
   const cookiesBrowser = process.env.YTDLP_COOKIES_BROWSER ?? "firefox";

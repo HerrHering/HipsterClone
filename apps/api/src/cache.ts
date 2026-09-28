@@ -76,9 +76,37 @@ export function listCachedIds(): string[] {
 // re-checks the disk cache right when its queued turn comes up, so a second
 // caller for a song the first one just finished simply finds it already
 // there and skips its own download — no per-id bookkeeping needed.
-const DOWNLOAD_COOLDOWN_MS = 5_000;
+const DOWNLOAD_COOLDOWN_MS = 1_000;
 let downloadQueueTail: Promise<void> = Promise.resolve();
 let lastDownloadFinishedAt = 0;
+
+// One candidate attempt: wait out whatever's left of the cooldown, then run
+// the actual yt-dlp download for this specific videoId. No queue-chaining of
+// its own — the caller (ensureCached's runTurn) already holds the queue's
+// one slot for the whole multi-candidate sequence below, so a song needing
+// several fallback attempts still resolves (success or total failure) as one
+// uninterrupted block, not interleaved with other songs' requests.
+async function attemptOneCandidate(
+  id: string,
+  videoId: string,
+): Promise<string | null> {
+  const waitMs = lastDownloadFinishedAt + DOWNLOAD_COOLDOWN_MS - Date.now();
+  if (waitMs > 0) {
+    if (DEBUG) {
+      console.log(`ensureCached debug: cooling down for ${waitMs}ms before "${id}"`);
+    }
+    await delay(waitMs);
+  }
+  try {
+    const result = await downloadClip(id, videoId, cacheDir);
+    return result?.filePath ?? null;
+  } finally {
+    // Stamped after every real attempt, success or failure — the whole
+    // point is spacing out actual yt-dlp/YouTube hits, regardless of why
+    // the next one is happening.
+    lastDownloadFinishedAt = Date.now();
+  }
+}
 
 /**
  * Ensures a song's audio is on disk, downloading it first if necessary.
@@ -117,22 +145,26 @@ export async function ensureCached(id: string): Promise<string | null> {
       console.log(`ensureCached debug: cache miss for "${id}", downloading...`);
     }
 
-    const waitMs = lastDownloadFinishedAt + DOWNLOAD_COOLDOWN_MS - Date.now();
-    if (waitMs > 0) {
-      if (DEBUG) {
-        console.log(`ensureCached debug: cooling down for ${waitMs}ms before "${id}"`);
+    for (const [i, candidate] of song.audio.entries()) {
+      // Explicit short-path before every attempt, not just relied on
+      // implicitly via "we already returned once one succeeded" — cheap,
+      // and correct even if this ever stops being the only writer.
+      if (isCached(id)) {
+        return cachedFilePath(id);
       }
-      await delay(waitMs);
+      const filePath = await attemptOneCandidate(id, candidate.videoId);
+      if (filePath) {
+        console.log(`ensureCached: url ${i + 1} loaded successfully for "${id}"`);
+        return filePath;
+      }
+      if (i < song.audio.length - 1) {
+        console.warn(
+          `ensureCached: url ${i + 1} skipped for "${id}", trying url ${i + 2}...`,
+        );
+      }
     }
-    try {
-      const result = await downloadClip(id, song.audio.videoId, cacheDir);
-      return result?.filePath ?? null;
-    } finally {
-      // Only stamped for a real download attempt — the cache-hit-after-
-      // waiting case above returns before this point, so it never touched
-      // YouTube and shouldn't consume any of the cooldown window.
-      lastDownloadFinishedAt = Date.now();
-    }
+    console.warn(`ensureCached: all ${song.audio.length} candidate(s) failed for "${id}"`);
+    return null;
   };
 
   // Chain this call onto the tail (waits for whatever's already queued),

@@ -288,23 +288,27 @@ function scoreCandidate(
 
 /**
  * ORCHESTRATOR — runs the yt-dlp search, then Stage 1/2/3 above for every
- * candidate it gets back, and picks the highest-scoring one. This is the
- * only exported function in this file; everything above is a private
- * helper it calls.
+ * candidate it gets back, and returns up to 3 of the highest-scoring ones.
+ * This is the only exported function in this file; everything above is a
+ * private helper it calls.
  *
- * Resolves a title+artist to a candidate YouTube video via `yt-dlp` search,
- * scored by title/artist similarity and plausible duration. Always returns
- * its single best-scored candidate (never blocks waiting for human
- * confirmation) — but a low-confidence pick is logged with its full score
- * breakdown so a bad auto-pick can be spotted, and understood, and fixed
- * later by hand (hand-edit the song's `audio.videoId` directly in
- * manifest.json — see index.ts's reuse step for why that sticks across
- * future scrapes).
+ * Resolves a title+artist to candidate YouTube videos via `yt-dlp` search,
+ * scored by title/artist similarity and plausible duration. The best-scored
+ * candidate is always included (never blocks waiting for human confirmation,
+ * and a low-confidence pick is logged with its full score breakdown so a bad
+ * auto-pick can be spotted and fixed by hand later) — but 2 further backups
+ * are included too, each only if it individually clears
+ * CONFIDENCE_WARN_THRESHOLD, so `apps/api/src/cache.ts`'s download path has
+ * somewhere to fall back to if the top pick turns out to be broken
+ * server-side (a real case: a YouTube-side streaming restriction hit the
+ * #1 pick specifically while a lower-scored candidate for the same song
+ * worked fine). See index.ts's reuse step for how a hand-edit to any of
+ * these videoIds in manifest.json sticks across future scrapes.
  */
 export async function resolveSource(
   title: string,
   artist: string,
-): Promise<ResolvedSource | null> {
+): Promise<ResolvedSource[] | null> {
   // NOT A REAL URL — `ytsearch5:...` is yt-dlp's own pseudo-URL syntax
   // meaning "search YouTube for this text and treat the top N results as a
   // playlist." It only means anything to yt-dlp itself; it's never sent as
@@ -391,11 +395,31 @@ export async function resolveSource(
     );
   }
 
-  return {
-    videoId: best.candidate.id,
-    videoTitle: best.candidate.title,
-    channel: best.candidate.channel ?? best.candidate.uploader ?? "",
-    durationSec: best.candidate.duration ?? 0,
-    confidence: best.breakdown.total,
-  };
+  // #1 is always kept regardless of score (matches the "best effort" warning
+  // above — a low-confidence pick still beats no pick at all). #2 and #3 are
+  // added only as a contiguous prefix of `scored` that also clears
+  // CONFIDENCE_WARN_THRESHOLD, so a backup is never *worse* than what the
+  // low-confidence warning would already have flagged as risky on its own.
+  const kept = [best];
+  for (const next of scored.slice(1, 3)) {
+    if (next.breakdown.total < CONFIDENCE_WARN_THRESHOLD) {
+      break;
+    }
+    kept.push(next);
+  }
+
+  if (DEBUG && kept.length > 1) {
+    console.log(
+      `resolveSource debug: keeping ${kept.length} candidate(s) as fallbacks: ` +
+        kept.map(({ candidate }) => candidate.id).join(", "),
+    );
+  }
+
+  return kept.map(({ candidate, breakdown }) => ({
+    videoId: candidate.id,
+    videoTitle: candidate.title,
+    channel: candidate.channel ?? candidate.uploader ?? "",
+    durationSec: candidate.duration ?? 0,
+    confidence: breakdown.total,
+  }));
 }

@@ -511,7 +511,7 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
   // local network/fetch progress, something the server has no visibility
   // into at all.
   const [audioStatus, setAudioStatus] = useState<
-    "loading" | "buffering" | "playing" | "paused"
+    "loading" | "buffering" | "playing" | "paused" | "failed"
   >("loading");
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -865,12 +865,22 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                     }
                   }, POLL_INTERVAL_MS);
                 }}
+                // Fires when the underlying request fails (e.g. the server
+                // exhausted every candidate source for this song and
+                // returned a 404) — without this, a totally-unplayable song
+                // just left audioStatus stuck on "loading" forever, with no
+                // way for the active player to know to use Skip song below.
+                onError={() => setAudioStatus("failed")}
               />
               <br />
               {locked ? (
                 <span>Paused — waiting for everyone to catch up…</span>
               ) : syncing ? (
                 <span>Syncing with server…</span>
+              ) : audioStatus === "failed" ? (
+                <span className="blob blob-danger blob-sm">
+                  This song failed to load — use Skip song below.
+                </span>
               ) : (
                 // Only the loading/buffering states get a label here — the
                 // native controls above already show play/pause visually,
@@ -933,6 +943,11 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                     current === "loading" ? "paused" : current,
                   )
                 }
+                // See the active-player branch's onError for why this
+                // exists — a 404 (every candidate source exhausted
+                // server-side) otherwise leaves this stuck on "loading"/
+                // "buffering" forever with no indication anything's wrong.
+                onError={() => setAudioStatus("failed")}
               />
               <audio
                 className="audio-player"
@@ -945,11 +960,13 @@ export function GameBoard({ playerId, state, songsById, onAction }: Props) {
                 tabIndex={-1}
               />
               <br />
-              <span>
+              <span className={audioStatus === "failed" ? "blob blob-danger blob-sm" : undefined}>
                 {audioStatus === "loading" && "Loading song…"}
                 {audioStatus === "buffering" && "Buffering…"}
                 {audioStatus === "playing" && "Playing"}
                 {audioStatus === "paused" && "Paused"}
+                {audioStatus === "failed" &&
+                  `This song failed to load — waiting for ${activeName} to skip.`}
               </span>
               <button className="btn btn-outline" onClick={() => setMuted((prev) => !prev)}>
                 {muted ? "Unmute for me" : "Mute for me"}

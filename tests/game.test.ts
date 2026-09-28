@@ -7,13 +7,15 @@ const testData = vi.hoisted(() => {
     title: `Song ${year}`,
     artist: `Artist ${year}`,
     year,
-    audio: {
-      videoId: `video-${year}`,
-      videoTitle: `Song ${year}`,
-      channel: `Artist ${year}`,
-      durationSec: 180,
-      confidence: 1,
-    },
+    audio: [
+      {
+        videoId: `video-${year}`,
+        videoTitle: `Song ${year}`,
+        channel: `Artist ${year}`,
+        durationSec: 180,
+        confidence: 1,
+      },
+    ],
   });
   const manifest: SongManifest = {
     version: "test-catalog",

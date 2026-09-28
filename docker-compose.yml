@@ -6,6 +6,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: "5174"
+      # Temporary, for the ongoing candidate-fallback debugging — shows every
+      # yt-dlp command, cache hit/miss, and full error object, not just the
+      # always-on warnings. Remove (or set to "0") once things settle down.
+      HIPSTER_DEBUG: "1"
       # See downloadClip.ts — a headless server has no real logged-in
       # browser profile to pull YouTube cookies from, so this points at
       # a cookies.txt exported ahead of time (see the deploy runbook).

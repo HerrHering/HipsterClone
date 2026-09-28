@@ -178,7 +178,14 @@ async function main() {
     // of being silently overwritten by a fresh resolveSource call.
     const previous = previousEntriesById.get(id);
     if (previous) {
-      entries.push({ ...previous, active: true });
+      // Defensive normalization for manifests written before an entry could
+      // hold multiple candidates: `audio` used to be a single object, not an
+      // array. Wrapping it here (rather than requiring a full re-scrape)
+      // means existing songs migrate to the new shape for free, with zero
+      // new YouTube requests — only genuinely new/re-resolved songs get more
+      // than one candidate.
+      const audio = Array.isArray(previous.audio) ? previous.audio : [previous.audio];
+      entries.push({ ...previous, audio, active: true });
       if (DEBUG) {
         console.log(
           `(${index + 1}/${rows.length}) Reused entry in manifest for "${row.title}" by "${row.artist}"`,
@@ -205,15 +212,11 @@ async function main() {
       artist: row.artist,
       year,
       active: true,
-      audio: {
-        // `videoId` is just an 11-character YouTube id here — turning it
-        // into an actual playable URL happens later, in downloadClip.ts.
-        videoId: resolved.videoId,
-        videoTitle: resolved.videoTitle,
-        channel: resolved.channel,
-        durationSec: resolved.durationSec,
-        confidence: resolved.confidence,
-      },
+      // `resolved` is already an array of up to 3 candidates, best-first —
+      // see resolveSource's own docs for why more than one gets kept.
+      // `videoId` on each is just an 11-character YouTube id; turning it
+      // into an actual playable URL happens later, in downloadClip.ts.
+      audio: resolved,
     });
     if (DEBUG) {
       console.log(

@@ -16,13 +16,15 @@ const song = (
   title,
   artist,
   year,
-  audio: {
-    videoId: `${id}-video`,
-    videoTitle: title,
-    channel: artist,
-    durationSec: 180,
-    confidence: 1,
-  },
+  audio: [
+    {
+      videoId: `${id}-video`,
+      videoTitle: title,
+      channel: artist,
+      durationSec: 180,
+      confidence: 1,
+    },
+  ],
 });
 
 const songsById: SongLookup = {

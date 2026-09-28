@@ -31,7 +31,13 @@ export interface SongManifestEntry {
    * the scraper.
    */
   active: boolean;
-  audio: SongAudioRef;
+  /**
+   * Up to 3 candidate YouTube sources for this song, ordered best-first
+   * (index 0 is always resolveSource's top pick). More than one exists so
+   * apps/api's ensureCached can fall back automatically if the top pick
+   * turns out to be broken/restricted server-side — see cache.ts.
+   */
+  audio: SongAudioRef[];
 }
 
 export interface SongManifest {
